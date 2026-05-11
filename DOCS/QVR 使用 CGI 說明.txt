@@ -1,0 +1,141 @@
+ 
+1. 取得 全部 http share link 啟用狀態
+
+datas: 包括每個 channel 的 stream 資訊
+
+sharelink_enabled: false/true, 有無啟用 share link
+
+GET http://10.29.30.240:8080/qvrpro/apis/camera_status.cgi?qsauth_type=0&qsauth_token=5objsdqe&sid=5objsdqe&act=get_all_status
+ 
+{
+    "total_channel_num": 16,
+    "used_channel_num": 6,
+    "cur_status_ver": 39,
+    "success": true,
+    "processing_camera_configuration": false,
+    "empty_channel_num": 10,
+    "datas": [
+        {
+            "channel_index": 0,
+            "name": "1F-WH-PICKUP-A",
+            "ip": "10.29.32.31",
+            "umsid": "0000002000000009",
+            "guid": "9853741A9E189853741A9E1898530000",
+            "nic_mem": "",
+            "port": 80,
+            "enable_md_hw_decode": 1,
+            "selected_video_source": "",
+            "brand": "A-MTK",
+            "model": "AH6853XD",
+            "is_dynamic_onvif": true,
+            "support_cam_motion": 1,
+            "detection_src": 1,
+            "video_enabled": 1,
+            "normal_recording_enabled": 1,
+            "is_fisheye_camera": 1,
+            "video_codec_setting": "H.265",
+            "video_resolution_setting": "3000x3000",
+            "frame_rate_setting": "30",
+            "video_quality_setting": "Quality 90",
+            "video_bitrate_type": 0,
+            "stream_state": [
+                {
+                    "stream": 0,
+                    "enable_normal_recording": 1,
+                    "enable_alarm_recording": 1,
+                    "video_codec_setting": "H.265",
+                    "video_resolution_setting": "3000x3000",
+                    "frame_rate_setting": "30",
+                    "video_quality_setting": "Quality 90",
+                    "video_bitrate_type": 0,
+                    "status": "NVR_CAM_CONNECTED",
+                    "rec_state": "NOT_RECORDING",
+                    "rec_state_err_code": 0,
+                    "frame_rate": 30,
+                    "bit_rate": 3793614
+             }],
+ 
+            "sharelink_enabled": 1
+        }]
+}
+
+
+
+2. 用 guid 查有無啟用 HTTP share link, 這隻也會回 stream 的資訊
+
+GET http://10.29.30.240:8080/qvrpro/apis/sharelink_settings.cgi?qsauth_type=0&qsauth_token=5objsdqe&sid=5objsdqe&act=show_share_status&guid=9853741A9E189853741A9E1898530000
+
+{
+    "shared":false,
+
+    "streams":[{
+			"stream_id":0,
+			"name":"Stream 1",
+			"video_codec":"H.265",
+			"resolution":"3000x3000",
+			"fps":"30"
+		},
+		{
+			"stream_id":1,
+			"name":"Stream 2",
+			"video_codec":"H.264",
+			"resolution":"640x640",
+			"fps":"15"
+		},
+		{
+			"stream_id":2,
+			"name":"Stream 3",
+			"video_codec":"H.265",
+			"resolution":"640x640",
+			"fps":"15"
+		},
+		{
+			"stream_id":3,
+			"name":"Stream 4",
+			"video_codec":"null",
+			"resolution":"null",
+			"fps":"null"
+		},
+		{
+			"stream_id":4,
+			"name":"Stream 5",
+			"video_codec":"null",
+			"resolution":"null",
+			"fps":"null"
+		}]
+
+}
+
+
+shared: false/true, 有無啟用 share link
+
+streams: stream 資訊
+ 
+ 
+ 
+3. 啟用 share link
+POST http://10.29.30.240:8080/qvrpro/apis/sharelink_settings.cgi?qsauth_type=0&qsauth_token=5objsdqe&sid=5objsdqe&act=enable
+ 
+body:
+{"guid":"9853741A9E189853741A9E1898530000","stream_id":1,"enable_vcode":false,"vcode":"","refresh":0}
+ 
+vcode: 若需驗證碼，才需要填，值為 base64 編碼。
+refresh: 若要產生新連結，填1。
+ 
+ 
+response:
+ 
+{
+	"path": "/qvrpro/share.cgi?ssid=0c5845c8ceea4d56a9c7c3ebcef07bd2",
+	"enable_vcode": true,
+	"time_enable_shared": "2024-8-8 10:36:0",
+	"time_expired": "2124-8-8 10:36:0",
+	"success":true
+}
+ 
+[上午 10:37] Luke Lei 雷勝翔
+如果會抓全部 camera 清單(呼叫 1), 就可以不必呼叫 2
+ 
+[上午 10:38] Luke Lei 雷勝翔
+2. 是可以事後再用 guid 查出 share link 是什麼
+ 

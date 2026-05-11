@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Get-ChildItem -Path \"d:\\\\Python\\\\QVRDashboard\" -Recurse | Where-Object { !$_.PSIsContainer } | Select-Object FullName)",
+      "PowerShell(Get-Process -Id 11832)",
+      "PowerShell(Get-Process -Id 11832 -ErrorAction SilentlyContinue)"
+    ]
+  }
+}
