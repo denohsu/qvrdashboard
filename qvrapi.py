@@ -94,26 +94,22 @@ class QVRApi:
         except requests.exceptions.RequestException:
             return False
 
-    def get_guid(self) -> list:
-        """取得 GUID 方式 (取得攝影機列表與 GUID)"""
+    def get_guid(self):
+        """取得攝影機列表。成功回傳 dict/list；API 呼叫失敗回傳 None。"""
         if not self.sid:
             print("No SID available.")
-            return []
-            
-        params = {
-            "ver": "1.1.0"
-        }
+            return None
+
+        params = {"ver": "1.1.0"}
         try:
             response = self._get("qvrpro/camera/list", params=params)
-            # 因為返回值是 JSON 格式，我們直接解析它
-            data = response.json()
-            return data
+            return response.json()
         except requests.exceptions.RequestException as e:
             print(f"Error getting camera list: {e}")
-            return []
+            return None
         except ValueError:
             print("Failed to parse JSON response.")
-            return []
+            return None
 
     def start_recording(self, camera_guid: str) -> bool:
         """啟動錄影方式"""

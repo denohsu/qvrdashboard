@@ -25,16 +25,25 @@
                     <h2>服務器主機清單與狀態 (Servers Overview)</h2>
                     <button class="btn-add-server" onclick="openServerModal()">+ Add QVR Server</button>
                 </div>
+                <div id="camera-stats-container">
+                    <!-- 第一列：服務器統計 -->
+                    <div class="camera-stats-bar">
+                        <div class="stat-item"><span class="stat-item-label">Total Server</span><span id="stat-server-total" class="stat-item-value">--</span></div>
+                        <div class="stat-item"><span class="stat-item-label">Server Online</span><span id="stat-server-online" class="stat-item-value stat-green">--</span></div>
+                        <div class="stat-item"><span class="stat-item-label">Server Offline</span><span id="stat-server-offline" class="stat-item-value stat-red">--</span></div>
+                    </div>
+                    <!-- 第二列：攝影機統計 -->
+                    <div class="camera-stats-bar">
+                        <div class="stat-item"><span class="stat-item-label">Total Camera</span><span id="stat-total" class="stat-item-value">--</span></div>
+                        <div class="stat-item"><span class="stat-item-label">On Line Camera</span><span id="stat-online" class="stat-item-value stat-green">--</span></div>
+                        <div class="stat-item"><span class="stat-item-label">Off Line Camera</span><span id="stat-offline" class="stat-item-value stat-red">--</span></div>
+                        <div class="stat-item"><span class="stat-item-label">IDLE Camera</span><span id="stat-idle" class="stat-item-value" style="color:#94a3b8;">--</span></div>
+                        <div class="stat-item"><span class="stat-item-label">Recording</span><span id="stat-recording" class="stat-item-value stat-green">--</span></div>
+                        <div class="stat-item"><span class="stat-item-label">Not Recording</span><span id="stat-not-recording" class="stat-item-value stat-red">--</span></div>
+                    </div>
+                </div>
                 <div id="servers-container" class="grid-container">
                     <div style="color: var(--text-secondary);">Loading servers...</div>
-                </div>
-                <div id="camera-stats-container" class="camera-stats-bar">
-                    <div class="stat-item"><span class="stat-item-label">Total Camera</span><span id="stat-total" class="stat-item-value">--</span></div>
-                    <div class="stat-item"><span class="stat-item-label">On Line Camera</span><span id="stat-online" class="stat-item-value stat-green">--</span></div>
-                    <div class="stat-item"><span class="stat-item-label">Off Line Camera</span><span id="stat-offline" class="stat-item-value stat-red">--</span></div>
-                    <div class="stat-item"><span class="stat-item-label">IDLE Camera</span><span id="stat-idle" class="stat-item-value" style="color:#94a3b8;">--</span></div>
-                    <div class="stat-item"><span class="stat-item-label">Recording</span><span id="stat-recording" class="stat-item-value stat-green">--</span></div>
-                    <div class="stat-item"><span class="stat-item-label">Not Recording</span><span id="stat-not-recording" class="stat-item-value stat-red">--</span></div>
                 </div>
             </section>
 
@@ -43,6 +52,26 @@
                 <div id="cameras-container" class="list-container">
                     <div style="color: var(--text-secondary);">Loading cameras...</div>
                 </div>
+            </section>
+
+            <section class="alarms-section glass-panel">
+                <h2>主機連線警報列表 (Server Connection Alarms)</h2>
+                <div class="table-container">
+                    <table id="server-alarms-table">
+                        <thead>
+                            <tr>
+                                <th>攝影機主機 (Server)</th>
+                                <th>IP</th>
+                                <th>狀態 (Status)</th>
+                                <th>記錄當下時間 (Time)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="server-alarms-body">
+                            <tr><td colspan="4" style="text-align: center; color: var(--text-secondary);">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="pagination" id="server-alarms-pagination"></div>
             </section>
 
             <section class="alarms-section glass-panel">

@@ -32,7 +32,7 @@ def get_index():
     return "<h1>Dashboard is building...</h1>"
 
 def _fetch_server_data(name: str, api, now_str: str) -> tuple:
-    """單一伺服器的資料擷取，回傳 (server_info, alarms)，供並行執行使用。"""
+    """單一伺服器的資料擷取，回傳 (server_info, cam_alarms, server_alarm)，供並行執行使用。"""
     server_info = {
         "name": name,
         "ip_address": api.ip_address,
@@ -40,21 +40,32 @@ def _fetch_server_data(name: str, api, now_str: str) -> tuple:
         "camera_count": 0,
         "cameras": []
     }
-    alarms = []
+    cam_alarms = []
 
     if not api.check_connection():
-        return server_info, alarms
+        server_alarm = {"server_name": name, "ip_address": api.ip_address,
+                        "status": "Offline", "timestamp": now_str}
+        return server_info, cam_alarms, server_alarm
 
     # 優先嘗試 renew SID，若無 SID 或已過期則重新登入
     if not (api.sid and api.renew_sid()):
         api.get_sid()
     if not api.sid:
         server_info["status"] = "Auth Failed"
-        return server_info, alarms
+        server_alarm = {"server_name": name, "ip_address": api.ip_address,
+                        "status": "Auth Failed", "timestamp": now_str}
+        return server_info, cam_alarms, server_alarm
+
+    camera_data = api.get_guid()
+    if camera_data is None:
+        # SID 有效但攝影機清單 API 失敗，代表 QVR 服務異常
+        server_info["status"] = "Service Error"
+        server_alarm = {"server_name": name, "ip_address": api.ip_address,
+                        "status": "Service Error", "timestamp": now_str}
+        return server_info, cam_alarms, server_alarm
 
     server_info["status"] = "Online"
 
-    camera_data = api.get_guid()
     cameras_raw = []
     if isinstance(camera_data, dict):
         cameras_raw = camera_data.get("datas", [])
@@ -78,7 +89,7 @@ def _fetch_server_data(name: str, api, now_str: str) -> tuple:
 
         _s = cam_status.upper()
         if "DISCONNECTED" in _s:
-            alarms.append({
+            cam_alarms.append({
                 "server_name": name,
                 "camera_index": cam_index,
                 "camera_name": cam_name,
@@ -86,14 +97,13 @@ def _fetch_server_data(name: str, api, now_str: str) -> tuple:
                 "timestamp": now_str
             })
 
-    return server_info, alarms
+    return server_info, cam_alarms, None  # None 表示主機正常，無主機警報
 
 
 @app.get("/api/dashboard_data")
 def get_dashboard_data():
     """
-    並行獲取所有伺服器與攝影機的狀態資料，
-    並自動過濾出狀態為 IDLE 的警報紀錄。
+    並行獲取所有伺服器與攝影機的狀態資料。
     """
     servers = load_servers_from_file("serverlist.txt")
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -111,15 +121,19 @@ def get_dashboard_data():
     # 依原始設定檔順序排列
     server_list = []
     alarm_list = []
+    server_alarm_list = []
     for name in servers:
-        server_info, alarms = results[name]
+        server_info, cam_alarms, server_alarm = results[name]
         server_list.append(server_info)
-        alarm_list.extend(alarms)
+        alarm_list.extend(cam_alarms)
+        if server_alarm:
+            server_alarm_list.append(server_alarm)
 
     return {
         "timestamp": now_str,
         "servers": server_list,
-        "alarms": alarm_list
+        "alarms": alarm_list,
+        "server_alarms": server_alarm_list
     }
 
 class CameraAction(BaseModel):

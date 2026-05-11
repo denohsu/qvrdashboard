@@ -14,6 +14,7 @@ async function fetchDashboardData() {
         renderServers(data.servers);
         renderCameraStats(data.servers);
         renderCameras(data.servers);
+        renderServerAlarms(data.server_alarms || []);
         renderAlarms(data.alarms);
     } catch (error) {
         console.error('Error fetching dashboard data:', error);
@@ -21,8 +22,10 @@ async function fetchDashboardData() {
 }
 
 function getStatusClass(status) {
-    if (status.toUpperCase() === 'ONLINE') return 'status-online';
-    if (status.toUpperCase() === 'OFFLINE') return 'status-offline';
+    const s = status.toUpperCase();
+    if (s === 'ONLINE') return 'status-online';
+    if (s === 'OFFLINE') return 'status-offline';
+    if (s === 'SERVICE ERROR') return 'status-warning';
     return 'status-warning';
 }
 
@@ -35,8 +38,13 @@ function getCameraConnectionLabel(status) {
 }
 
 function renderCameraStats(servers) {
+    let serverTotal = servers.length, serverOnline = 0, serverOffline = 0;
     let total = 0, online = 0, offline = 0, idle = 0, recording = 0, notRecording = 0;
+
     servers.forEach(server => {
+        if (server.status.toUpperCase() === 'ONLINE') serverOnline++;
+        else serverOffline++;
+
         (server.cameras || []).forEach(cam => {
             total++;
             const conn = getCameraConnectionLabel(cam.status);
@@ -48,6 +56,10 @@ function renderCameraStats(servers) {
             else notRecording++;
         });
     });
+
+    document.getElementById('stat-server-total').textContent = serverTotal;
+    document.getElementById('stat-server-online').textContent = serverOnline;
+    document.getElementById('stat-server-offline').textContent = serverOffline;
     document.getElementById('stat-total').textContent = total;
     document.getElementById('stat-online').textContent = online;
     document.getElementById('stat-offline').textContent = offline;
@@ -160,6 +172,56 @@ async function controlCamera(serverName, cameraGuid, action) {
     } catch (error) {
         console.error('Error executing camera action:', error);
         alert('An error occurred while sending the command.');
+    }
+}
+
+// ── Server Connection Alarms ─────────────────────────────────────────────────
+
+const SERVER_ALARM_MAX = 50;
+const SERVER_ALARM_PAGE_SIZE = 10;
+let serverAlarmBuffer = [];
+let serverAlarmCurrentPage = 1;
+
+function renderServerAlarms(newAlarms) {
+    serverAlarmBuffer = [...newAlarms, ...serverAlarmBuffer].slice(0, SERVER_ALARM_MAX);
+    renderServerAlarmPage(serverAlarmCurrentPage);
+}
+
+function renderServerAlarmPage(page) {
+    const tbody      = document.getElementById('server-alarms-body');
+    const pagination = document.getElementById('server-alarms-pagination');
+    tbody.innerHTML  = '';
+
+    if (serverAlarmBuffer.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; color:var(--success-color);">All servers connected normally.</td></tr>`;
+        pagination.innerHTML = '';
+        return;
+    }
+
+    const totalPages = Math.ceil(serverAlarmBuffer.length / SERVER_ALARM_PAGE_SIZE);
+    page = Math.min(Math.max(page, 1), totalPages);
+    serverAlarmCurrentPage = page;
+
+    const start = (page - 1) * SERVER_ALARM_PAGE_SIZE;
+    serverAlarmBuffer.slice(start, start + SERVER_ALARM_PAGE_SIZE).forEach(alarm => {
+        const statusCls = alarm.status === 'Offline' ? 'status-offline' : 'status-warning';
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td>${alarm.server_name}</td>
+            <td>${alarm.ip_address}</td>
+            <td><span class="status-badge ${statusCls}">${alarm.status}</span></td>
+            <td>${alarm.timestamp}</td>
+        `;
+        tbody.appendChild(tr);
+    });
+
+    pagination.innerHTML = '';
+    for (let i = 1; i <= totalPages; i++) {
+        const btn = document.createElement('button');
+        btn.textContent = i;
+        btn.className = 'page-btn' + (i === page ? ' page-btn-active' : '');
+        btn.onclick = () => renderServerAlarmPage(i);
+        pagination.appendChild(btn);
     }
 }
 
