@@ -55,7 +55,10 @@
             </section>
 
             <section class="alarms-section glass-panel">
-                <h2>主機連線警報列表 (Server Connection Alarms)</h2>
+                <div class="section-header" style="margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center;">
+                    <h2 style="margin: 0;">主機連線警報列表 (Server Connection Alarms)</h2>
+                    <button class="btn-add-server" onclick="openLogsModal('server')">View Log History</button>
+                </div>
                 <div class="table-container">
                     <table id="server-alarms-table">
                         <thead>
@@ -75,7 +78,10 @@
             </section>
 
             <section class="alarms-section glass-panel">
-                <h2>警報管理列表 (Alarm Management)</h2>
+                <div class="section-header" style="margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center;">
+                    <h2 style="margin: 0;">警報管理列表 (Alarm Management)</h2>
+                    <button class="btn-add-server" onclick="openLogsModal('camera')">View Log History</button>
+                </div>
                 <div class="table-container">
                     <table id="alarms-table">
                         <thead>
@@ -143,6 +149,21 @@
             <div class="modal-footer">
                 <button class="btn-cancel" onclick="closeServerModal()">Cancel</button>
                 <button class="btn-save" onclick="saveServerConfig()">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Logs Modal -->
+    <div id="logs-modal-overlay" class="modal-overlay" style="display:none;">
+        <div class="modal-card" style="max-width: 800px; width: 90%;">
+            <div class="modal-header">
+                <h3>Alarm Log History (Up to 14 days)</h3>
+                <button class="modal-close" onclick="closeLogsModal()">&#x2715;</button>
+            </div>
+            <div class="modal-body">
+                <div id="logs-content" style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: 8px; height: 400px; overflow-y: auto; font-family: monospace; white-space: pre-wrap; font-size: 0.9rem; color: var(--text-primary);">
+                    Loading logs...
+                </div>
             </div>
         </div>
     </div>

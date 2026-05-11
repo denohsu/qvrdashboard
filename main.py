@@ -6,6 +6,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 import uvicorn
 from pydantic import BaseModel
+import logging
+from logging.handlers import TimedRotatingFileHandler
 
 # 導入我們寫好的 qvrapi
 from qvrapi import (load_servers_from_file, load_all_server_configs,
@@ -14,6 +16,48 @@ from qvrapi import (load_servers_from_file, load_all_server_configs,
 SERVERLIST_PATH = "serverlist.txt"
 
 app = FastAPI(title="QVR Dashboard API")
+
+# 確保 logs 資料夾存在
+LOGS_DIR = os.path.join(os.path.dirname(__file__), "logs")
+if not os.path.exists(LOGS_DIR):
+    os.makedirs(LOGS_DIR)
+
+# 設定主機警報記錄器 (14天輪轉)
+server_alarm_logger = logging.getLogger("ServerAlarmLogger")
+server_alarm_logger.setLevel(logging.INFO)
+if not server_alarm_logger.handlers:
+    server_handler = TimedRotatingFileHandler(
+        os.path.join(LOGS_DIR, "server_alarms.log"),
+        when="midnight",
+        interval=1,
+        backupCount=14,
+        encoding="utf-8"
+    )
+    formatter = logging.Formatter('%(asctime)s - %(message)s')
+    server_handler.setFormatter(formatter)
+    server_alarm_logger.addHandler(server_handler)
+
+# 設定攝影機警報記錄器 (14天輪轉)
+camera_alarm_logger = logging.getLogger("CameraAlarmLogger")
+camera_alarm_logger.setLevel(logging.INFO)
+if not camera_alarm_logger.handlers:
+    camera_handler = TimedRotatingFileHandler(
+        os.path.join(LOGS_DIR, "camera_alarms.log"),
+        when="midnight",
+        interval=1,
+        backupCount=14,
+        encoding="utf-8"
+    )
+    camera_handler.setFormatter(formatter)
+    camera_alarm_logger.addHandler(camera_handler)
+
+def update_and_log_alarms(cam_alarms, server_alarms):
+    # 直接記錄所有當前的警報 (每次 polling 都會記錄，讓歷史看得到持續狀態)
+    for a in server_alarms:
+        server_alarm_logger.info(f"SERVER ALARM: {a['server_name']} (IP: {a['ip_address']}) is {a['status']}")
+        
+    for a in cam_alarms:
+        camera_alarm_logger.info(f"CAMERA ALARM: {a['server_name']} - {a['camera_name']} (#{a['camera_index']}) is {a['camera_status']}")
 
 # 確保 static 資料夾存在
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
@@ -129,6 +173,9 @@ def get_dashboard_data():
         if server_alarm:
             server_alarm_list.append(server_alarm)
 
+    # 記錄警報至 LOG 檔案
+    update_and_log_alarms(alarm_list, server_alarm_list)
+
     return {
         "timestamp": now_str,
         "servers": server_list,
@@ -227,6 +274,34 @@ def delete_server_config(server_name: str):
         return {"success": False, "message": "Server not found"}
     save_servers_to_file(SERVERLIST_PATH, new_configs)
     return {"success": True}
+
+
+@app.get("/api/alarm_logs")
+def get_alarm_logs(type: str = "camera"):
+    """讀取最多 14 天的歷史警報紀錄"""
+    import glob
+    
+    log_prefix = "camera_alarms.log" if type == "camera" else "server_alarms.log"
+    log_files = glob.glob(os.path.join(LOGS_DIR, f"{log_prefix}*"))
+    
+    def sort_key(f):
+        return f if f != os.path.join(LOGS_DIR, log_prefix) else "z" * 100
+        
+    log_files.sort(key=sort_key, reverse=True) # newest files first
+    
+    all_logs = []
+    for fpath in log_files:
+        if os.path.exists(fpath):
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    lines = f.read().splitlines()
+                    # 檔案內是由舊到新，所以將這個檔案的行反轉
+                    lines.reverse()
+                    all_logs.extend(lines)
+            except Exception:
+                pass
+                
+    return {"logs": all_logs}
 
 
 if __name__ == "__main__":

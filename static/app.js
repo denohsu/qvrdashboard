@@ -83,14 +83,27 @@ function renderServers(servers) {
         const card = document.createElement('div');
         card.className = 'server-card';
         
+        let camerasHtml = '';
+        if (server.cameras && server.cameras.length > 0) {
+            camerasHtml = server.cameras.map(c => `<li><span class="status-badge ${getCameraConnectionLabel(c.status).cls}" style="font-size:0.6rem; padding:0.1rem 0.3rem; margin-right:0.3rem;">${getCameraConnectionLabel(c.status).label}</span>${c.name}</li>`).join('');
+        } else {
+            camerasHtml = '<li>No cameras</li>';
+        }
+
         card.innerHTML = `
             <div class="server-header">
                 <div class="server-name">${server.name}</div>
                 <div class="status-badge ${getStatusClass(server.status)}">${server.status}</div>
             </div>
             <div class="server-ip">IP : ${server.ip_address}</div>
-            <div style="margin-top: 0.5rem; font-size: 0.8rem; color: var(--text-secondary);">
-                Cameras : ${server.cameras ? server.cameras.length : 0}
+            <div style="margin-top: 0.5rem; font-size: 0.8rem; color: var(--text-secondary); display: flex; justify-content: space-between; align-items: center;">
+                <span>Cameras : ${server.cameras ? server.cameras.length : 0}</span>
+                <button class="btn-toggle-cams" onclick="toggleCameras(this)" style="background:none; border:none; color:var(--accent-color); cursor:pointer;">▼ Show</button>
+            </div>
+            <div class="server-cameras-list" style="display:none; margin-top: 0.5rem; font-size: 0.8rem; color: var(--text-primary); background: rgba(0,0,0,0.2); padding: 0.5rem; border-radius: 6px;">
+                <ul style="list-style: none; padding: 0; margin: 0; max-height: 120px; overflow-y: auto; display: flex; flex-direction: column; gap: 0.3rem;">
+                    ${camerasHtml}
+                </ul>
             </div>
             <div class="server-card-actions">
                 <button class="btn-edit" onclick="openServerModal('${server.name}')">Edit</button>
@@ -99,6 +112,17 @@ function renderServers(servers) {
         `;
         container.appendChild(card);
     });
+}
+
+window.toggleCameras = function(btn) {
+    const list = btn.parentElement.nextElementSibling;
+    if (list.style.display === 'none') {
+        list.style.display = 'block';
+        btn.textContent = '▲ Hide';
+    } else {
+        list.style.display = 'none';
+        btn.textContent = '▼ Show';
+    }
 }
 
 function renderCameras(servers) {
@@ -138,8 +162,11 @@ function renderCameras(servers) {
         });
         
         group.innerHTML = `
-            <h3>${server.name} Cameras</h3>
-            <div class="camera-grid">
+            <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none;" onclick="toggleCameraGrid(this)">
+                <h3 style="margin: 0; color: var(--accent-color);">${server.name} Cameras</h3>
+                <span class="toggle-icon" style="color: var(--text-secondary); transition: transform 0.2s;">▼</span>
+            </div>
+            <div class="camera-grid" style="margin-top: 1rem;">
                 ${camerasHtml}
             </div>
         `;
@@ -149,6 +176,18 @@ function renderCameras(servers) {
     
     if (!hasCameras) {
         container.innerHTML = '<div style="color: var(--text-secondary);">No cameras found or failed to connect to servers.</div>';
+    }
+}
+
+window.toggleCameraGrid = function(header) {
+    const grid = header.nextElementSibling;
+    const icon = header.querySelector('.toggle-icon');
+    if (grid.style.display === 'none') {
+        grid.style.display = 'grid';
+        icon.style.transform = 'rotate(0deg)';
+    } else {
+        grid.style.display = 'none';
+        icon.style.transform = 'rotate(-90deg)';
     }
 }
 
@@ -379,4 +418,35 @@ async function deleteServer(serverName) {
 // 點擊遮罩關閉 Modal
 document.getElementById('server-modal-overlay').addEventListener('click', e => {
     if (e.target === document.getElementById('server-modal-overlay')) closeServerModal();
+});
+
+// ── Logs Modal ───────────────────────────────────────────────────────────────
+
+async function openLogsModal(type = 'camera') {
+    document.getElementById('logs-modal-overlay').style.display = 'flex';
+    const content = document.getElementById('logs-content');
+    const title = document.querySelector('#logs-modal-overlay .modal-header h3');
+    title.textContent = (type === 'camera' ? 'Camera' : 'Server') + ' Alarm Log History (Up to 14 days)';
+    content.innerHTML = 'Fetching logs...';
+    
+    try {
+        const response = await fetch(`/api/alarm_logs?type=${type}`);
+        const data = await response.json();
+        if (data.logs && data.logs.length > 0) {
+            content.textContent = data.logs.join('\n');
+        } else {
+            content.textContent = 'No logs available.';
+        }
+    } catch (error) {
+        console.error('Error fetching logs:', error);
+        content.textContent = 'Failed to load logs.';
+    }
+}
+
+function closeLogsModal() {
+    document.getElementById('logs-modal-overlay').style.display = 'none';
+}
+
+document.getElementById('logs-modal-overlay').addEventListener('click', e => {
+    if (e.target === document.getElementById('logs-modal-overlay')) closeLogsModal();
 });
