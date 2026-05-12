@@ -11,6 +11,7 @@ QVRDashboard/
 ├── main.py            # FastAPI 後端主程式，提供 REST API
 ├── qvrapi.py          # QVR Pro API 封裝模組
 ├── serverlist.txt     # 伺服器設定檔
+├── logs/              # 存放警報歷史紀錄檔 (server_alarms.log, camera_alarms.log)
 └── static/
     ├── index.html     # 前端頁面結構
     ├── styles.css     # 前端樣式
@@ -49,6 +50,11 @@ app.js 渲染
 | GET | `/` | 前端頁面 |
 | GET | `/api/dashboard_data` | 取得所有伺服器與攝影機狀態 |
 | POST | `/api/camera_action` | 控制攝影機錄影（啟動 / 停止） |
+| GET | `/api/server_configs` | 取得伺服器設定清單 |
+| POST | `/api/server_configs` | 新增伺服器設定 |
+| PUT | `/api/server_configs/{server_name}` | 修改指定伺服器設定 |
+| DELETE| `/api/server_configs/{server_name}` | 刪除指定伺服器設定 |
+| GET | `/api/alarm_logs` | 讀取歷史警報紀錄 |
 
 ---
 
@@ -107,10 +113,10 @@ python main.py
 服務啟動後開啟瀏覽器前往：
 
 ```
-http://127.0.0.1:6666
+http://127.0.0.1:9999
 ```
 
-> 若需對外開放，服務預設已監聽 `0.0.0.0:6666`，確認防火牆規則後可直接從其他裝置存取。
+> 若需對外開放，服務預設已監聽 `0.0.0.0:9999`，確認防火牆規則後可直接從其他裝置存取。
 
 ---
 

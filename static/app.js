@@ -87,10 +87,37 @@ function renderServers(servers) {
         card.className = `server-card ${blinkClass}`;
         
         let camerasHtml = '';
+        let recDaysStatsHtml = '';
+        
         if (server.cameras && server.cameras.length > 0) {
-            camerasHtml = server.cameras.map(c => `<li><span class="status-badge ${getCameraConnectionLabel(c.status).cls}" style="font-size:0.6rem; padding:0.1rem 0.3rem; margin-right:0.3rem;">${getCameraConnectionLabel(c.status).label}</span>${c.name}</li>`).join('');
+            // Calculate rec days stats
+            const stats = {};
+            server.cameras.forEach(c => {
+                const days = c.normal_rec_days || 0;
+                stats[days] = (stats[days] || 0) + 1;
+            });
+            const sortedDays = Object.keys(stats).map(Number).sort((a, b) => b - a);
+            const statsItems = sortedDays.map(days => {
+                return `${days} 天 : <strong style="color: var(--text-primary);">${stats[days]}</strong> 支`;
+            }).join(' <span style="color:var(--text-secondary);">/</span> ');
+            
+            recDaysStatsHtml = `<div style="margin-top: 0.5rem; font-size: 0.8rem; color: var(--text-secondary); line-height: 1.4;">錄影天數 [ ${statsItems} ]</div>`;
+            
+            // Build camera list HTML
+            camerasHtml = server.cameras.map(c => {
+                const connLabel = getCameraConnectionLabel(c.status);
+                const recDays = c.normal_rec_days || 0;
+                return `
+                <li style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 0.3rem;">
+                    <div style="display: flex; align-items: center; overflow: hidden;">
+                        <span class="status-badge ${connLabel.cls}" style="font-size:0.6rem; padding:0.1rem 0.3rem; margin-right:0.3rem; min-width: 45px; text-align: center;">${connLabel.label}</span>
+                        <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px;" title="${c.name}">${c.name}</span>
+                    </div>
+                    <span style="font-size: 0.75rem; color: var(--text-secondary); background: rgba(255,255,255,0.05); padding: 0.15rem 0.4rem; border-radius: 4px; white-space: nowrap;">錄影天數: ${recDays} 天</span>
+                </li>`;
+            }).join('');
         } else {
-            camerasHtml = '<li>No cameras</li>';
+            camerasHtml = '<li style="color: var(--text-secondary); text-align: center; padding: 0.5rem 0;">No cameras</li>';
         }
 
         card.innerHTML = `
@@ -100,6 +127,7 @@ function renderServers(servers) {
             </div>
             <div class="server-ip">IP : ${server.ip_address}</div>
             <div class="server-ip" style="margin-top: 0.2rem;">System : ${server.qvr_prefix || 'Unknown'}</div>
+            ${recDaysStatsHtml}
             <div style="margin-top: 0.5rem; font-size: 0.8rem; color: var(--text-secondary); display: flex; justify-content: space-between; align-items: center;">
                 <span>Cameras : ${server.cameras ? server.cameras.length : 0}</span>
                 <button class="btn-toggle-cams" onclick="toggleCameras(this)" style="background:none; border:none; color:var(--accent-color); cursor:pointer;">▼ Show</button>
@@ -167,6 +195,32 @@ function renderCameras(servers) {
                         <div class="stat-row">
                             <span class="stat-label">Recording:</span>
                             <span class="status-badge ${rec.cls}">${rec.label}</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">錄影天數:</span>
+                            <span class="status-badge" style="background: rgba(255,255,255,0.1); color: #fff;">${cam.normal_rec_days || 0} 天</span>
+                        </div>
+                        <div style="border-top: 1px solid rgba(255,255,255,0.05); margin: 0.4rem 0; padding-top: 0.4rem; display: flex; flex-direction: column; gap: 0.25rem;">
+                            <div class="stat-row">
+                                <span class="stat-label">品牌:</span>
+                                <span style="font-size: 0.8rem; color: var(--text-secondary);">${cam.brand || '-'}</span>
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-label">型號:</span>
+                                <span style="font-size: 0.8rem; color: var(--text-secondary);">${cam.model || '-'}</span>
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-label">格式:</span>
+                                <span style="font-size: 0.8rem; color: var(--text-secondary);">${cam.video_codec_setting || '-'}</span>
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-label">解析度:</span>
+                                <span style="font-size: 0.8rem; color: var(--text-secondary);">${cam.video_resolution_setting || '-'}</span>
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-label">FPS:</span>
+                                <span style="font-size: 0.8rem; color: var(--text-secondary);">${cam.frame_rate_setting || '-'}</span>
+                            </div>
                         </div>
                     </div>
                 </div>

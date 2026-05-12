@@ -130,7 +130,13 @@ def _fetch_server_data(name: str, api, now_str: str) -> tuple:
             "name": cam_name,
             "status": cam_status,
             "rec_state": cam.get("rec_state", "UNKNOWN"),
-            "guid": cam.get("guid", "")
+            "guid": cam.get("guid", ""),
+            "normal_rec_days": cam.get("normal_rec_days", 0),
+            "brand": cam.get("brand", "Unknown"),
+            "model": cam.get("model", "Unknown"),
+            "video_codec_setting": cam.get("video_codec_setting", "Unknown"),
+            "video_resolution_setting": cam.get("video_resolution_setting", "Unknown"),
+            "frame_rate_setting": cam.get("frame_rate_setting", "Unknown")
         })
 
         _s = cam_status.upper()
