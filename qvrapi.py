@@ -12,6 +12,27 @@ class QVRApi:
         self.password = password_base64
         self.base_url = f"http://{self.ip_address}:{self.port}"
         self.sid = None
+        self._qvr_prefix = None
+
+    def get_qvr_prefix(self) -> str:
+        """從 /qvrentry 取得 fw_web_ui_prefix，自動適應 QVR Pro / QVR Elite"""
+        if self._qvr_prefix is not None:
+            return self._qvr_prefix
+            
+        try:
+            url = f"{self.base_url}/qvrentry"
+            response = requests.get(url, timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                prefix = data.get("fw_web_ui_prefix", "qvrpro")
+                self._qvr_prefix = prefix.strip('/')
+            else:
+                self._qvr_prefix = "qvrpro"
+        except Exception as e:
+            print(f"Error getting qvrentry for {self.ip_address}: {e}")
+            self._qvr_prefix = "qvrpro"
+            
+        return self._qvr_prefix
 
     def _get(self, endpoint: str, params: Dict[str, Any] = None) -> requests.Response:
         url = f"{self.base_url}/{endpoint}"
@@ -102,7 +123,7 @@ class QVRApi:
 
         params = {"ver": "1.1.0"}
         try:
-            response = self._get("qvrpro/camera/list", params=params)
+            response = self._get(f"{self.get_qvr_prefix()}/camera/list", params=params)
             return response.json()
         except requests.exceptions.RequestException as e:
             print(f"Error getting camera list: {e}")
@@ -120,7 +141,7 @@ class QVRApi:
         params = {
             "ver": "1.1.0"
         }
-        endpoint = f"qvrpro/camera/mrec/{camera_guid}/start"
+        endpoint = f"{self.get_qvr_prefix()}/camera/mrec/{camera_guid}/start"
         
         try:
             response = self._put(endpoint, params=params)
@@ -142,7 +163,7 @@ class QVRApi:
         params = {
             "ver": "1.1.0"
         }
-        endpoint = f"qvrpro/camera/mrec/{camera_guid}/stop"
+        endpoint = f"{self.get_qvr_prefix()}/camera/mrec/{camera_guid}/stop"
         
         try:
             response = self._put(endpoint, params=params)
@@ -161,7 +182,7 @@ class QVRApi:
             print("No SID available.")
             return False
             
-        endpoint = f"qvrpro/qvrip/Event/recvNotify/GENERIC/{vault_id}"
+        endpoint = f"{self.get_qvr_prefix()}/qvrip/Event/recvNotify/GENERIC/{vault_id}"
         
         try:
             # 根據文件，Body 為自定義資料字串，我們將字串編碼後傳送
@@ -182,7 +203,7 @@ class QVRApi:
             print("No SID available.")
             return False
             
-        endpoint = f"qvrpro/camera/recordingfile/{camera_guid}/{stream}"
+        endpoint = f"{self.get_qvr_prefix()}/camera/recordingfile/{camera_guid}/{stream}"
         params = {
             "ver": "1.1.0",
             "start_time": start_time, # 需為 Timestamp (毫秒)
@@ -210,7 +231,7 @@ class QVRApi:
         }
         try:
             # 根據文件，使用與取得清單相同的 API
-            response = self._get("qvrpro/camera/list", params=params)
+            response = self._get(f"{self.get_qvr_prefix()}/camera/list", params=params)
             json_resp = response.json()
             
             # 走訪 datas 陣列尋找符合的 guid
@@ -238,7 +259,7 @@ class QVRApi:
             
         params = {"act": "get_all_status"}
         try:
-            response = self._get("qvrpro/apis/camera_status.cgi", params=params)
+            response = self._get(f"{self.get_qvr_prefix()}/apis/camera_status.cgi", params=params)
             return response.json()
         except requests.exceptions.RequestException as e:
             print(f"Error getting all status: {e}")
@@ -258,7 +279,7 @@ class QVRApi:
             "guid": camera_guid
         }
         try:
-            response = self._get("qvrpro/apis/sharelink_settings.cgi", params=params)
+            response = self._get(f"{self.get_qvr_prefix()}/apis/sharelink_settings.cgi", params=params)
             return response.json()
         except requests.exceptions.RequestException as e:
             print(f"Error checking share link for {camera_guid}: {e}")
@@ -283,7 +304,7 @@ class QVRApi:
         }
         
         try:
-            response = self._post("qvrpro/apis/sharelink_settings.cgi", params=params, json_data=json_data)
+            response = self._post(f"{self.get_qvr_prefix()}/apis/sharelink_settings.cgi", params=params, json_data=json_data)
             return response.json()
         except requests.exceptions.RequestException as e:
             print(f"Error enabling share link for {camera_guid}: {e}")

@@ -1,3 +1,5 @@
+let cameraGridState = JSON.parse(localStorage.getItem('cameraGridState')) || {}; // { 'ServerName': true (expanded) / false (collapsed) }
+
 document.addEventListener('DOMContentLoaded', () => {
     fetchDashboardData();
     // Refresh every 30 seconds
@@ -31,9 +33,9 @@ function getStatusClass(status) {
 
 function getCameraConnectionLabel(status) {
     const s = status.toUpperCase();
-    if (s === 'NVR_CAM_CONNECTED' || s === 'NVR_CAM_CONNECTING') return { label: 'On Line', cls: 'status-online' };
+    if (s === 'NVR_CAM_CONNECTED') return { label: 'On Line', cls: 'status-online' };
     if (s === 'NVR_CAM_CONNECT_IDLE') return { label: 'IDLE', cls: 'status-idle' };
-    if (s === 'NVR_CAM_DISCONNECTED') return { label: 'Off Line', cls: 'status-offline' };
+    if (s === 'NVR_CAM_DISCONNECTED' || s === 'NVR_CAM_CONNECTING') return { label: 'Off Line', cls: 'status-offline' };
     return { label: status, cls: 'status-warning' };
 }
 
@@ -81,7 +83,8 @@ function renderServers(servers) {
     
     servers.forEach(server => {
         const card = document.createElement('div');
-        card.className = 'server-card';
+        const blinkClass = server.status.toUpperCase() !== 'ONLINE' ? 'blinking-border' : '';
+        card.className = `server-card ${blinkClass}`;
         
         let camerasHtml = '';
         if (server.cameras && server.cameras.length > 0) {
@@ -96,6 +99,7 @@ function renderServers(servers) {
                 <div class="status-badge ${getStatusClass(server.status)}">${server.status}</div>
             </div>
             <div class="server-ip">IP : ${server.ip_address}</div>
+            <div class="server-ip" style="margin-top: 0.2rem;">System : ${server.qvr_prefix || 'Unknown'}</div>
             <div style="margin-top: 0.5rem; font-size: 0.8rem; color: var(--text-secondary); display: flex; justify-content: space-between; align-items: center;">
                 <span>Cameras : ${server.cameras ? server.cameras.length : 0}</span>
                 <button class="btn-toggle-cams" onclick="toggleCameras(this)" style="background:none; border:none; color:var(--accent-color); cursor:pointer;">▼ Show</button>
@@ -135,14 +139,22 @@ function renderCameras(servers) {
         hasCameras = true;
         
         const group = document.createElement('div');
-        group.className = 'server-camera-group';
         
         let camerasHtml = '';
+        let hasAbnormalCamera = false;
+        
         server.cameras.forEach(cam => {
             const conn = getCameraConnectionLabel(cam.status);
             const rec = getRecordingLabel(cam.rec_state);
+            
+            let cardBlinkClass = '';
+            if (conn.label !== 'On Line' && conn.label !== 'IDLE') {
+                hasAbnormalCamera = true;
+                cardBlinkClass = 'blinking-border';
+            }
+            
             camerasHtml += `
-                <div class="camera-card">
+                <div class="camera-card ${cardBlinkClass}">
                     <div class="camera-name">
                         <span>${cam.name}</span>
                         <span class="camera-id">#${cam.channel_index}</span>
@@ -161,12 +173,20 @@ function renderCameras(servers) {
             `;
         });
         
+        const isExpanded = cameraGridState[server.name] !== false; // default true
+        const gridDisplay = isExpanded ? 'grid' : 'none';
+        const iconTransform = isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)';
+        const blinkClass = (!isExpanded && hasAbnormalCamera) ? 'blinking-border' : '';
+        
+        group.className = `server-camera-group ${blinkClass}`;
+        group.dataset.hasAbnormal = hasAbnormalCamera ? 'true' : 'false';
+        
         group.innerHTML = `
-            <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none;" onclick="toggleCameraGrid(this)">
+            <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none;" onclick="toggleCameraGrid(this, '${server.name}')">
                 <h3 style="margin: 0; color: var(--accent-color);">${server.name} Cameras</h3>
-                <span class="toggle-icon" style="color: var(--text-secondary); transition: transform 0.2s;">▼</span>
+                <span class="toggle-icon" style="color: var(--text-secondary); transition: transform 0.2s; transform: ${iconTransform};">▼</span>
             </div>
-            <div class="camera-grid" style="margin-top: 1rem;">
+            <div class="camera-grid" style="margin-top: 1rem; display: ${gridDisplay};">
                 ${camerasHtml}
             </div>
         `;
@@ -179,16 +199,25 @@ function renderCameras(servers) {
     }
 }
 
-window.toggleCameraGrid = function(header) {
+window.toggleCameraGrid = function(header, serverName) {
+    const group = header.parentElement;
     const grid = header.nextElementSibling;
     const icon = header.querySelector('.toggle-icon');
+    
     if (grid.style.display === 'none') {
         grid.style.display = 'grid';
         icon.style.transform = 'rotate(0deg)';
+        cameraGridState[serverName] = true;
+        group.classList.remove('blinking-border');
     } else {
         grid.style.display = 'none';
         icon.style.transform = 'rotate(-90deg)';
+        cameraGridState[serverName] = false;
+        if (group.dataset.hasAbnormal === 'true') {
+            group.classList.add('blinking-border');
+        }
     }
+    localStorage.setItem('cameraGridState', JSON.stringify(cameraGridState));
 }
 
 async function controlCamera(serverName, cameraGuid, action) {
@@ -216,13 +245,12 @@ async function controlCamera(serverName, cameraGuid, action) {
 
 // ── Server Connection Alarms ─────────────────────────────────────────────────
 
-const SERVER_ALARM_MAX = 50;
 const SERVER_ALARM_PAGE_SIZE = 10;
 let serverAlarmBuffer = [];
 let serverAlarmCurrentPage = 1;
 
 function renderServerAlarms(newAlarms) {
-    serverAlarmBuffer = [...newAlarms, ...serverAlarmBuffer].slice(0, SERVER_ALARM_MAX);
+    serverAlarmBuffer = [...newAlarms];
     renderServerAlarmPage(serverAlarmCurrentPage);
 }
 
@@ -264,14 +292,13 @@ function renderServerAlarmPage(page) {
     }
 }
 
-const ALARM_MAX = 50;
 const ALARM_PAGE_SIZE = 10;
 let alarmBuffer = [];
 let alarmCurrentPage = 1;
 
 function renderAlarms(newAlarms) {
-    // 新資料插入最前面，保留最多 50 筆
-    alarmBuffer = [...newAlarms, ...alarmBuffer].slice(0, ALARM_MAX);
+    // 僅顯示刷新當下的資料
+    alarmBuffer = [...newAlarms];
     renderAlarmPage(alarmCurrentPage);
 }
 

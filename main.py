@@ -80,6 +80,7 @@ def _fetch_server_data(name: str, api, now_str: str) -> tuple:
     server_info = {
         "name": name,
         "ip_address": api.ip_address,
+        "qvr_prefix": "qvrpro",
         "status": "Offline",
         "camera_count": 0,
         "cameras": []
@@ -109,6 +110,7 @@ def _fetch_server_data(name: str, api, now_str: str) -> tuple:
         return server_info, cam_alarms, server_alarm
 
     server_info["status"] = "Online"
+    server_info["qvr_prefix"] = api._qvr_prefix or "qvrpro"
 
     cameras_raw = []
     if isinstance(camera_data, dict):
@@ -132,7 +134,7 @@ def _fetch_server_data(name: str, api, now_str: str) -> tuple:
         })
 
         _s = cam_status.upper()
-        if "DISCONNECTED" in _s:
+        if "DISCONNECTED" in _s or _s == "NVR_CAM_CONNECTING":
             cam_alarms.append({
                 "server_name": name,
                 "camera_index": cam_index,

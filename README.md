@@ -121,7 +121,7 @@ http://127.0.0.1:6666
 | API 原始值 | 顯示 | 顏色 |
 |-----------|------|------|
 | `NVR_CAM_CONNECTED` | On Line | 綠色 |
-| `NVR_CAM_CONNECTING` | On Line | 綠色 |
+| `NVR_CAM_CONNECTING` | Off Line | 紅色 |
 | `NVR_CAM_CONNECT_IDLE` | IDLE | 灰色 |
 | `NVR_CAM_DISCONNECTED` | Off Line | 紅色 |
 

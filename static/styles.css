@@ -195,6 +195,17 @@ h2 {
     background: rgba(15, 23, 42, 0.4);
     border-radius: 12px;
     padding: 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+@keyframes borderBlink {
+    0% { border-color: rgba(255, 255, 255, 0.05); box-shadow: none; }
+    50% { border-color: var(--danger-color); box-shadow: 0 0 15px rgba(239, 68, 68, 0.4); }
+    100% { border-color: rgba(255, 255, 255, 0.05); box-shadow: none; }
+}
+
+.blinking-border {
+    animation: borderBlink 1.5s infinite !important;
 }
 
 .server-camera-group h3 {
