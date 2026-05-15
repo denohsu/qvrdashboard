@@ -238,8 +238,11 @@ class QVRApi:
 
     def get_disk_smart(self) -> list:
         """
-        取得所有硬碟 SMART 狀態，回傳 hd_smart == 2（異常）的硬碟清單。
-        格式：[{"hd_no": "0001:0001", "hd_smart": "2", "label": "異常"}, ...]
+        解析 disk_manage.cgi?func=get_all 的 <Ecnlosure_info> 區塊。
+        回傳格式：
+        [{"id": "0", "model": "...", "total_bays": 24,
+          "warnings": [{"hd_no": "...", "slot": N, "hd_smart": "1", "label": "警告"}],
+          "errors":   [{"hd_no": "...", "slot": N, "hd_smart": "2", "label": "異常"}]}]
         """
         if not self.sid:
             return []
@@ -266,45 +269,68 @@ class QVRApi:
             print(f"[disk_smart][{self.ip_address}] authPassed={auth}")
             return []
 
-        # 自動偵測 Disk_Info block tag（不同韌體可能用不同 tag）
-        block_tag = None
-        for candidate in ["Disk_Info", "hd_info", "disk_info", "HDInfo"]:
+        # 韌體 typo 為 "Ecnlosure"，同時支援正確拼字 "Enclosure"
+        encl_tag = None
+        for candidate in ["Ecnlosure_info", "Enclosure_info", "enclosure_info"]:
             if _re.search(rf'<{candidate}[\s>]', raw, _re.IGNORECASE):
-                block_tag = candidate
+                encl_tag = candidate
                 break
 
-        if not block_tag:
-            # 印出前 600 字元幫助排查
-            print(f"[disk_smart][{self.ip_address}] 找不到 Disk block tag，RAW前600:\n{raw[:600]}")
+        if not encl_tag:
+            print(f"[disk_smart][{self.ip_address}] 找不到 Enclosure block tag，RAW前600:\n{raw[:600]}")
             return []
 
-        print(f"[disk_smart][{self.ip_address}] 使用 block tag: <{block_tag}>")
+        print(f"[disk_smart][{self.ip_address}] 使用 enclosure tag: <{encl_tag}>")
 
-        # 結構：<Disk_Info> 內有多個 <row>，每個 <row> 代表一顆硬碟
-        rows = _re.findall(r'<row>(.*?)</row>', raw, _re.DOTALL | _re.IGNORECASE)
-        print(f"[disk_smart][{self.ip_address}] 找到 {len(rows)} 個 row")
+        encl_blocks = _re.findall(
+            rf'<{_re.escape(encl_tag)}[^>]*>(.*?)</{_re.escape(encl_tag)}>',
+            raw, _re.DOTALL | _re.IGNORECASE
+        )
+        print(f"[disk_smart][{self.ip_address}] 找到 {len(encl_blocks)} 個 enclosure")
 
-        abnormal = []
-        for row in rows:
-            hd_no    = _x(row, "hd_no")
-            hd_smart = _x(row, "hd_smart")
+        result = []
+        for block in encl_blocks:
+            encl_id    = _x(block, "enclosureID")   or "0"
+            encl_model  = _x(block, "enclModel")      or ""
+            encl_slots = _x(block, "enclosureSlot") or "0"
+            try:
+                total_bays = int(encl_slots)
+            except ValueError:
+                total_bays = 0
 
-            # 跳過無 hd_no 或無 hd_smart 的 row（slot header 不含 hd_smart）
-            if not hd_no or hd_smart is None:
-                continue
+            warnings = []
+            errors   = []
 
-            # hd_smart "0" = 正常，其他值均視為異常
-            if hd_smart != "0":
-                slot = int((hd_no.split(":")[-1] or "0"), 10)
-                abnormal.append({
-                    "hd_no":    hd_no,
-                    "slot":     slot,
-                    "hd_smart": hd_smart,
-                    "label":    SMART_LABEL.get(hd_smart, f"異常({hd_smart})"),
-                })
+            rows = _re.findall(r'<row>(.*?)</row>', block, _re.DOTALL | _re.IGNORECASE)
+            for row in rows:
+                hd_no    = _x(row, "hd_no")
+                hd_smart = _x(row, "hd_smart")
+                if not hd_no or hd_smart is None:
+                    continue
+                if hd_smart in ("1", "2"):
+                    slot = int((hd_no.split(":")[-1] or "0"), 10)
+                    entry = {
+                        "hd_no":    hd_no,
+                        "slot":     slot,
+                        "hd_smart": hd_smart,
+                        "label":    SMART_LABEL.get(hd_smart, f"異常({hd_smart})"),
+                    }
+                    if hd_smart == "1":
+                        warnings.append(entry)
+                    else:
+                        errors.append(entry)
 
-        print(f"[disk_smart][{self.ip_address}] 異常硬碟數: {len(abnormal)}")
-        return abnormal
+            result.append({
+                "id":         encl_id,
+                "model":      encl_model,
+                "total_bays": total_bays,
+                "warnings":   warnings,
+                "errors":     errors,
+            })
+            print(f"[disk_smart][{self.ip_address}] Enclosure {encl_id} ({encl_model}): "
+                  f"{total_bays} bays, {len(warnings)} warnings, {len(errors)} errors")
+
+        return result
 
     def get_system_info(self) -> dict | None:
         """取得系統資訊 (sysinfo)，回傳 dict 或 None。"""
@@ -644,8 +670,81 @@ class QVRApi:
             print("Failed to parse JSON response.")
             return {}
 
+class QFaceApi(QVRApi):
+    """QVR Face Insight 系統 API，繼承 QVRApi 認證機制，新增 get_about()。"""
+
+    def get_about(self) -> dict:
+        """呼叫 qvrfaceinsight/apis/about 取得系統版本與功能資訊。"""
+        try:
+            resp = self._get("qvrfaceinsight/apis/about")
+            data = resp.json()
+            return {
+                "error_code":    data.get("error_code", -1),
+                "error_message": data.get("error_message", ""),
+                "functions":     data.get("functions", []),
+                "server_name":   data.get("server_name", ""),
+                "version":       data.get("version", ""),
+            }
+        except Exception as e:
+            print(f"[qface_about][{self.ip_address}] error: {e}")
+            return {
+                "error_code":    -1,
+                "error_message": str(e),
+                "functions":     [],
+                "server_name":   "",
+                "version":       "",
+            }
+
+    def get_codec_license(self) -> str:
+        """呼叫 qvrfaceinsight/apis/codec_license 取得授權類型，回傳如 'BASIC'。"""
+        try:
+            resp = self._get("qvrfaceinsight/apis/codec_license")
+            data = resp.json()
+            return data.get("codec_license", "")
+        except Exception as e:
+            print(f"[qface_license][{self.ip_address}] error: {e}")
+            return ""
+
+    def get_stream_tasks(self) -> dict:
+        """呼叫 qvrfaceinsight/apis/stream_tasks 取得攝影機任務清單。"""
+        try:
+            resp = self._get("qvrfaceinsight/apis/stream_tasks")
+            data = resp.json()
+            tasks = []
+            for t in data.get("tasks", []):
+                events = t.get("events", [])
+                tasks.append({
+                    "camera_name":  t.get("camera_name", ""),
+                    "ip_address":   t.get("ip_address", ""),
+                    "media_status": t.get("media_status", ""),
+                    "events":       [e.get("name", str(e)) if isinstance(e, dict) else str(e) for e in events],
+                    "total_events": len(events),
+                })
+            return {
+                "total_tasks": data.get("total_tasks", len(tasks)),
+                "tasks":       tasks,
+            }
+        except Exception as e:
+            print(f"[qface_stream_tasks][{self.ip_address}] error: {e}")
+            return {"total_tasks": 0, "tasks": []}
+
+
+def _build_api(config: dict, name: str):
+    """依 SOFTWARE_TYPE 建立對應的 API 實例。"""
+    software_type = config.get('SOFTWARE_TYPE', 'qvr').lower()
+    cls = QFaceApi if software_type == 'qface' else QVRApi
+    api = cls(
+        config['IP_ADDRESS'],
+        int(config.get('PORT', 8080)),
+        config.get('USERNAME', ''),
+        config.get('PASSWORD', '')
+    )
+    api.server_name = name
+    return api
+
+
 def load_servers_from_file(filepath: str) -> Dict[str, QVRApi]:
-    """從設定檔中讀取並建立 QVRApi 實例的字典"""
+    """從設定檔中讀取並建立 QVRApi / QFaceApi 實例的字典"""
     import os
     servers = {}
     current_server_name = None
@@ -657,19 +756,12 @@ def load_servers_from_file(filepath: str) -> Dict[str, QVRApi]:
 
     with open(filepath, 'r', encoding='utf-8') as f:
         lines = f.readlines()
-        
+
     for line in lines:
         line = line.strip()
         if not line:
             if current_server_name and 'IP_ADDRESS' in current_config:
-                api = QVRApi(
-                    current_config['IP_ADDRESS'],
-                    int(current_config.get('PORT', 8080)),
-                    current_config.get('USERNAME', ''),
-                    current_config.get('PASSWORD', '')
-                )
-                api.server_name = current_server_name
-                servers[current_server_name] = api
+                servers[current_server_name] = _build_api(current_config, current_server_name)
             current_server_name = None
             current_config = {}
             continue
@@ -686,14 +778,7 @@ def load_servers_from_file(filepath: str) -> Dict[str, QVRApi]:
 
     # 處理最後一筆伺服器資料
     if current_server_name and 'IP_ADDRESS' in current_config:
-        api = QVRApi(
-            current_config['IP_ADDRESS'],
-            int(current_config.get('PORT', 8080)),
-            current_config.get('USERNAME', ''),
-            current_config.get('PASSWORD', '')
-        )
-        api.server_name = current_server_name
-        servers[current_server_name] = api
+        servers[current_server_name] = _build_api(current_config, current_server_name)
 
     return servers
 
@@ -732,6 +817,7 @@ def load_all_server_configs(filepath: str) -> list:
                 'port': int(current.get('PORT', 8080)),
                 'username': current.get('USERNAME', ''),
                 'password_base64': current.get('PASSWORD', ''),
+                'software_type': current.get('SOFTWARE_TYPE', 'qvr').lower(),
             })
 
     for line in lines:
@@ -762,6 +848,7 @@ def save_servers_to_file(filepath: str, configs: list):
             f.write(f"PORT : {cfg['port']}\n")
             f.write(f"USERNAME : {cfg['username']}\n")
             f.write(f"PASSWORD : {cfg['password_base64']}\n")
+            f.write(f"SOFTWARE_TYPE : {cfg.get('software_type', 'qvr')}\n")
             f.write("\n")
 
 

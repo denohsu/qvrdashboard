@@ -32,6 +32,7 @@ def get_memory_info(api) -> dict | None:
         "count":          int(time.time() * 1000),
         "sid":            api.sid,
     }
+    print(f"url: {url}, params: {params}") 
     try:
         r = requests.get(url, params=params, timeout=10)
         raw = r.text
@@ -74,9 +75,9 @@ def print_memory_info(name: str, ip: str, info: dict):
 
     print(f"\n{'='*55}")
     print(f"  Server  : {name} ({ip})")
-    print(f"  Total   : {info['total']} MB")
-    print(f"  Used    : {info['used']} MB")
-    print(f"  Free    : {info['free']} MB")
+    print(f"  Total   : {info['total']} KB")
+    print(f"  Used    : {info['used']} KB")
+    print(f"  Free    : {info['free']} KB")
     print(f"  Usage   : [{bar}] {info['pct']} %")
 
 

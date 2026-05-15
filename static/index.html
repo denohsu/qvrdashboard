@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>QVR Management Dashboard</title>
     <link rel="icon" type="image/svg+xml" href="/static/v3_IEI_Logo.svg">
-    <link rel="stylesheet" href="/static/styles.css?v=20260513-1">
+    <link rel="stylesheet" href="/static/styles.css?v=20260515-4">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
@@ -17,7 +17,21 @@
                 </div>
                 <h1>QVR Management Dashboard</h1>
             </div>
-            <div id="last-updated">Last Updated: --</div>
+            <div class="header-right">
+                <div class="refresh-control">
+                    <span class="refresh-label">更新頻率</span>
+                    <select id="refresh-interval-select" onchange="onRefreshIntervalChange(this.value)">
+                        <option value="30">30s</option>
+                        <option value="60">60s</option>
+                        <option value="120">120s</option>
+                        <option value="180">180s</option>
+                        <option value="240">240s</option>
+                        <option value="300">300s</option>
+                        <option value="600">600s</option>
+                    </select>
+                </div>
+                <div id="last-updated">Last Updated: --</div>
+            </div>
         </header>
 
         <main>
@@ -27,13 +41,13 @@
                     <button class="btn-add-server" onclick="openServerModal()">+ Add QVR Server</button>
                 </div>
                 <div id="camera-stats-container">
-                    <!-- 第一列：服務器統計 -->
+                    <!-- QVR 統計 -->
+                    <div class="stats-section-label">QVR 統計</div>
                     <div class="camera-stats-bar">
                         <div class="stat-item"><span class="stat-item-label">Total Server</span><span id="stat-server-total" class="stat-item-value">--</span></div>
                         <div class="stat-item"><span class="stat-item-label">Server Online</span><span id="stat-server-online" class="stat-item-value stat-green">--</span></div>
                         <div class="stat-item"><span class="stat-item-label">Server Offline</span><span id="stat-server-offline" class="stat-item-value stat-red">--</span></div>
                     </div>
-                    <!-- 第二列：攝影機統計 -->
                     <div class="camera-stats-bar">
                         <div class="stat-item"><span class="stat-item-label">Total Camera</span><span id="stat-total" class="stat-item-value">--</span></div>
                         <div class="stat-item"><span class="stat-item-label">On Line Camera</span><span id="stat-online" class="stat-item-value stat-green">--</span></div>
@@ -41,6 +55,18 @@
                         <div class="stat-item"><span class="stat-item-label">IDLE Camera</span><span id="stat-idle" class="stat-item-value" style="color:#94a3b8;">--</span></div>
                         <div class="stat-item"><span class="stat-item-label">Recording</span><span id="stat-recording" class="stat-item-value stat-green">--</span></div>
                         <div class="stat-item"><span class="stat-item-label">Not Recording</span><span id="stat-not-recording" class="stat-item-value stat-red">--</span></div>
+                    </div>
+                    <!-- QFACE 統計 -->
+                    <div class="stats-section-label" style="margin-top:0.5rem;">QFACE 統計</div>
+                    <div class="camera-stats-bar">
+                        <div class="stat-item"><span class="stat-item-label">Total Server</span><span id="stat-qface-server-total" class="stat-item-value">--</span></div>
+                        <div class="stat-item"><span class="stat-item-label">Server Online</span><span id="stat-qface-server-online" class="stat-item-value stat-green">--</span></div>
+                        <div class="stat-item"><span class="stat-item-label">Server Offline</span><span id="stat-qface-server-offline" class="stat-item-value stat-red">--</span></div>
+                    </div>
+                    <div class="camera-stats-bar">
+                        <div class="stat-item"><span class="stat-item-label">Total Tasks</span><span id="stat-qface-task-total" class="stat-item-value">--</span></div>
+                        <div class="stat-item"><span class="stat-item-label">Task Online</span><span id="stat-qface-task-online" class="stat-item-value stat-green">--</span></div>
+                        <div class="stat-item"><span class="stat-item-label">Task Offline</span><span id="stat-qface-task-offline" class="stat-item-value stat-red">--</span></div>
                     </div>
                 </div>
                 <div id="servers-container" class="grid-container">
@@ -112,6 +138,13 @@
             </div>
             <div class="modal-body">
                 <div class="form-group">
+                    <label>Software Type</label>
+                    <select id="field-software-type">
+                        <option value="qvr">QVR</option>
+                        <option value="qface">QFACE</option>
+                    </select>
+                </div>
+                <div class="form-group">
                     <label>Server Name</label>
                     <input type="text" id="field-name" placeholder="IEI29-QVR-01">
                 </div>
@@ -173,7 +206,7 @@
     <div id="sysinfo-modal-overlay" class="modal-overlay" style="display:none;">
         <div class="modal-card" style="max-width:560px; width:92%;">
             <div class="modal-header">
-                <h3 id="sysinfo-modal-title">系統身分證</h3>
+                <h3 id="sysinfo-modal-title">系統狀態</h3>
                 <button class="modal-close" onclick="closeSysinfoModal()">&#x2715;</button>
             </div>
             <div class="modal-body">
@@ -184,6 +217,6 @@
         </div>
     </div>
 
-    <script src="/static/app.js?v=20260513-9"></script>
+    <script src="/static/app.js?v=20260515-23"></script>
 </body>
 </html>

@@ -11,7 +11,7 @@ from logging.handlers import TimedRotatingFileHandler
 
 # 導入我們寫好的 qvrapi
 from qvrapi import (load_servers_from_file, load_all_server_configs,
-                    save_servers_to_file, encode_password, decode_password)
+                    save_servers_to_file, encode_password, decode_password, QFaceApi)
 
 SERVERLIST_PATH = "serverlist.txt"
 
@@ -77,10 +77,12 @@ def get_index():
 
 def _fetch_server_data(name: str, api, now_str: str) -> tuple:
     """單一伺服器的資料擷取，回傳 (server_info, cam_alarms, server_alarm)，供並行執行使用。"""
+    is_qface = isinstance(api, QFaceApi)
     server_info = {
         "name": name,
         "ip_address": api.ip_address,
-        "qvr_prefix": "qvrpro",
+        "software_type": "qface" if is_qface else "qvr",
+        "qvr_prefix": "qvrfaceinsight" if is_qface else "qvrpro",
         "status": "Offline",
         "camera_count": 0,
         "cameras": [],
@@ -101,6 +103,25 @@ def _fetch_server_data(name: str, api, now_str: str) -> tuple:
                         "status": "Auth Failed", "timestamp": now_str}
         return server_info, cam_alarms, server_alarm
 
+    # ── QFACE 路徑 ─────────────────────────────────────────────────────────────
+    if is_qface:
+        about = api.get_about()
+        about["codec_license"] = api.get_codec_license()
+        is_online = about.get("error_code") == 0
+        server_info["status"] = "Online" if is_online else "Service Error"
+        server_info["qface_about"] = about
+        server_info["qface_stream_tasks"] = api.get_stream_tasks() if is_online else {"total_tasks": 0, "tasks": []}
+        server_alarm = None
+        if not is_online:
+            server_alarm = {
+                "server_name": name,
+                "ip_address":  api.ip_address,
+                "status":      f"Service Error: {about.get('error_message', '')}",
+                "timestamp":   now_str,
+            }
+        return server_info, cam_alarms, server_alarm
+
+    # ── QVR 路徑 ───────────────────────────────────────────────────────────────
     camera_data = api.get_guid()
     if camera_data is None:
         # SID 有效但攝影機清單 API 失敗，代表 QVR 服務異常
@@ -139,7 +160,7 @@ def _fetch_server_data(name: str, api, now_str: str) -> tuple:
             "model": cam.get("model", "Unknown"),
             "video_codec_setting": cam.get("video_codec_setting", "Unknown"),
             "video_resolution_setting": cam.get("video_resolution_setting", "Unknown"),
-            "frame_rate_setting": cam.get("frame_rate_setting", "Unknown")
+            "frame_rate_setting": cam.get("frame_rate_setting", "Unknown"),
         })
 
         _s = cam_status.upper()
@@ -225,6 +246,7 @@ class ServerConfig(BaseModel):
     port: int = 8080
     username: str
     password: str  # 前端傳入明碼，後端轉 Base64 後存檔
+    software_type: str = "qvr"  # "qvr" 或 "qface"
 
 
 @app.get("/api/server_configs")
@@ -238,6 +260,7 @@ def get_server_configs():
             "port": c["port"],
             "username": c["username"],
             "password": decode_password(c["password_base64"]),
+            "software_type": c.get("software_type", "qvr"),
         }
         for c in configs
     ]
@@ -255,6 +278,7 @@ def add_server_config(payload: ServerConfig):
         "port": payload.port,
         "username": payload.username,
         "password_base64": encode_password(payload.password),
+        "software_type": payload.software_type,
     })
     save_servers_to_file(SERVERLIST_PATH, configs)
     return {"success": True}
@@ -271,6 +295,7 @@ def update_server_config(server_name: str, payload: ServerConfig):
             cfg["port"] = payload.port
             cfg["username"] = payload.username
             cfg["password_base64"] = encode_password(payload.password)
+            cfg["software_type"] = payload.software_type
             save_servers_to_file(SERVERLIST_PATH, configs)
             return {"success": True}
     return {"success": False, "message": "Server not found"}
@@ -300,42 +325,62 @@ def get_server_system_info(server_name: str):
     if not api.get_sid():
         return {"success": False, "message": "Auth failed"}
 
+    if isinstance(api, QFaceApi):
+        about = api.get_about()
+        about["codec_license"] = api.get_codec_license()
+        return {
+            "success":             True,
+            "software_type":       "qface",
+            "qface_about":         about,
+            "qface_stream_tasks":  api.get_stream_tasks() if about.get("error_code") == 0 else {"total_tasks": 0, "tasks": []},
+        }
+
     return {
-        "success":    True,
-        "sysinfo":    api.get_system_info(),
-        "memory":     api.get_memory_info(),
-        "disk_usage": api.get_disk_usage(),
-        "pool_info":  api.get_pool_info(),
-        "disk_smart": api.get_disk_smart(),
+        "success":       True,
+        "software_type": "qvr",
+        "sysinfo":       api.get_system_info(),
+        "memory":        api.get_memory_info(),
+        "disk_usage":    api.get_disk_usage(),
+        "pool_info":     api.get_pool_info(),
+        "disk_smart":    api.get_disk_smart(),
     }
 
 
 @app.get("/api/alarm_logs")
-def get_alarm_logs(type: str = "camera"):
-    """讀取最多 14 天的歷史警報紀錄"""
+def get_alarm_logs(type: str = "camera", offset: int = 0, limit: int = 100):
+    """讀取最多 14 天的歷史警報紀錄，支援分頁（offset / limit）"""
     import glob
-    
+
     log_prefix = "camera_alarms.log" if type == "camera" else "server_alarms.log"
     log_files = glob.glob(os.path.join(LOGS_DIR, f"{log_prefix}*"))
-    
+
     def sort_key(f):
         return f if f != os.path.join(LOGS_DIR, log_prefix) else "z" * 100
-        
-    log_files.sort(key=sort_key, reverse=True) # newest files first
-    
+
+    log_files.sort(key=sort_key, reverse=True)  # newest files first
+
     all_logs = []
     for fpath in log_files:
         if os.path.exists(fpath):
             try:
                 with open(fpath, "r", encoding="utf-8") as f:
                     lines = f.read().splitlines()
-                    # 檔案內是由舊到新，所以將這個檔案的行反轉
-                    lines.reverse()
+                    lines.reverse()  # 檔案內由舊到新，反轉後最新在前
                     all_logs.extend(lines)
             except Exception:
                 pass
-                
-    return {"logs": all_logs}
+
+    # 過濾空行
+    all_logs = [l for l in all_logs if l.strip()]
+    total = len(all_logs)
+    page  = all_logs[offset: offset + limit]
+
+    return {
+        "logs":     page,
+        "total":    total,
+        "offset":   offset,
+        "has_more": (offset + limit) < total,
+    }
 
 
 if __name__ == "__main__":

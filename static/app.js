@@ -1,9 +1,24 @@
 let cameraGridState = JSON.parse(localStorage.getItem('cameraGridState')) || {}; // { 'ServerName': true (expanded) / false (collapsed) }
 
+let _refreshTimer = null;
+
+function _startRefreshTimer(seconds) {
+    if (_refreshTimer) clearInterval(_refreshTimer);
+    _refreshTimer = setInterval(fetchDashboardData, seconds * 1000);
+}
+
+window.onRefreshIntervalChange = function (value) {
+    const seconds = parseInt(value);
+    localStorage.setItem('refreshInterval', seconds);
+    _startRefreshTimer(seconds);
+};
+
 document.addEventListener('DOMContentLoaded', () => {
+    const saved = localStorage.getItem('refreshInterval') || '30';
+    const select = document.getElementById('refresh-interval-select');
+    if (select) select.value = saved;
     fetchDashboardData();
-    // Refresh every 30 seconds
-    setInterval(fetchDashboardData, 30000);
+    _startRefreshTimer(parseInt(saved));
 });
 
 async function fetchDashboardData() {
@@ -40,12 +55,16 @@ function getCameraConnectionLabel(status) {
 }
 
 function renderCameraStats(servers) {
-    let serverTotal = servers.length, serverOnline = 0, serverOffline = 0;
+    const qvrServers   = servers.filter(s => s.software_type !== 'qface');
+    const qfaceServers = servers.filter(s => s.software_type === 'qface');
+
+    // ── QVR ─────────────────────────────────────────────────────────────────
+    let qvrOnline = 0, qvrOffline = 0;
     let total = 0, online = 0, offline = 0, idle = 0, recording = 0, notRecording = 0;
 
-    servers.forEach(server => {
-        if (server.status.toUpperCase() === 'ONLINE') serverOnline++;
-        else serverOffline++;
+    qvrServers.forEach(server => {
+        if (server.status.toUpperCase() === 'ONLINE') qvrOnline++;
+        else qvrOffline++;
 
         (server.cameras || []).forEach(cam => {
             total++;
@@ -59,15 +78,52 @@ function renderCameraStats(servers) {
         });
     });
 
-    document.getElementById('stat-server-total').textContent = serverTotal;
-    document.getElementById('stat-server-online').textContent = serverOnline;
-    document.getElementById('stat-server-offline').textContent = serverOffline;
-    document.getElementById('stat-total').textContent = total;
-    document.getElementById('stat-online').textContent = online;
-    document.getElementById('stat-offline').textContent = offline;
-    document.getElementById('stat-idle').textContent = idle;
-    document.getElementById('stat-recording').textContent = recording;
-    document.getElementById('stat-not-recording').textContent = notRecording;
+    const _set = (id, val) => { document.getElementById(id).textContent = val; };
+    const _setRed = (id, val) => {
+        const el = document.getElementById(id);
+        el.textContent = val;
+        el.style.textShadow = val > 0 ? '0 0 18px rgba(248,113,113,0.85), 0 0 6px rgba(248,113,113,0.5)' : 'none';
+    };
+
+    _set('stat-server-total', qvrServers.length);
+    _set('stat-server-online', qvrOnline);
+    _setRed('stat-server-offline', qvrOffline);
+    _set('stat-total', total);
+    _set('stat-online', online);
+    _setRed('stat-offline', offline);
+    _set('stat-idle', idle);
+    _set('stat-recording', recording);
+    _setRed('stat-not-recording', notRecording);
+
+    // ── QFACE ────────────────────────────────────────────────────────────────
+    let qfOnline = 0, qfOffline = 0;
+    let taskTotal = 0, taskOnline = 0, taskOffline = 0;
+
+    qfaceServers.forEach(server => {
+        if (server.status.toUpperCase() === 'ONLINE') qfOnline++;
+        else qfOffline++;
+
+        const st = server.qface_stream_tasks || { total_tasks: 0, tasks: [] };
+        taskTotal += st.total_tasks || 0;
+        (st.tasks || []).forEach(t => {
+            if ((t.media_status || '').toUpperCase() === 'MS_CONNECTED') taskOnline++;
+            else taskOffline++;
+        });
+    });
+
+    _set('stat-qface-server-total', qfaceServers.length);
+    _set('stat-qface-server-online', qfOnline);
+    _setRed('stat-qface-server-offline', qfOffline);
+    _set('stat-qface-task-total', taskTotal);
+    _set('stat-qface-task-online', taskOnline);
+    _setRed('stat-qface-task-offline', taskOffline);
+}
+
+function getQFaceMediaStatus(status) {
+    if ((status || '').toUpperCase() === 'MS_CONNECTED') {
+        return { label: 'OnLine', cls: 'status-online' };
+    }
+    return { label: 'Offline', cls: 'status-offline' };
 }
 
 function getRecordingLabel(recState) {
@@ -83,11 +139,74 @@ function renderServers(servers) {
 
     servers.forEach(server => {
         const card = document.createElement('div');
-        const isOffline = server.status.toUpperCase() !== 'ONLINE';
-        const hasDiskFault = (server.disk_smart || []).length > 0;
-        const blinkClass = isOffline ? 'blinking-border'
-            : hasDiskFault ? 'blinking-border-warning'
+
+        // ── QFACE 伺服器卡片 ───────────────────────────────────────────────────
+        if (server.software_type === 'qface') {
+            const isOffline = server.status.toUpperCase() !== 'ONLINE';
+            card.className = `server-card${isOffline ? ' blinking-border' : ''}`;
+            const ab       = server.qface_about || {};
+            const st       = server.qface_stream_tasks || { total_tasks: 0, tasks: [] };
+            const version   = ab.version            || '-';
+            const functions = (ab.functions || []).join(', ') || '-';
+            const sysName   = ab.server_name         || server.name;
+            const license   = ab.codec_license       || '-';
+            const errHtml   = (!isOffline && ab.error_code !== 0 && ab.error_message)
+                ? `<div style="margin-top:0.4rem;padding:0.4rem 0.6rem;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.35);border-radius:6px;font-size:0.75rem;color:var(--danger-color);">${ab.error_message}</div>`
                 : '';
+
+            const taskRows = (st.tasks || []).map(t => {
+                const ms   = getQFaceMediaStatus(t.media_status);
+                const evts = t.events.length > 0 ? t.events.join(' / ') : '-';
+                return `<li style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:1px solid rgba(255,255,255,0.05);padding-bottom:0.3rem;gap:0.4rem;">
+                    <div style="display:flex;align-items:center;gap:0.3rem;overflow:hidden;flex:1;">
+                        <span class="status-badge ${ms.cls}" style="font-size:0.6rem;padding:0.1rem 0.3rem;min-width:52px;text-align:center;">${ms.label}</span>
+                        <span style="word-break:break-word;line-height:1.35;">${t.camera_name}</span>
+                    </div>
+                    <div style="font-size:0.72rem;color:var(--text-secondary);white-space:nowrap;text-align:right;">
+                        <div>${t.ip_address || '-'}</div>
+                        <div style="color:var(--accent-color);">Events: ${t.total_events} &nbsp;<span style="color:var(--text-secondary);font-size:0.68rem;">${evts}</span></div>
+                    </div>
+                </li>`;
+            }).join('');
+
+            card.innerHTML = `
+                <div class="server-header">
+                    <div style="display:flex;align-items:center;gap:0.4rem;">
+                        <span style="font-size:0.62rem;font-weight:700;padding:0.12rem 0.38rem;border-radius:4px;background:rgba(167,139,250,0.15);color:#a78bfa;border:1px solid rgba(167,139,250,0.35);text-transform:uppercase;letter-spacing:0.05em;">QFACE</span>
+                        <div class="server-name">${server.name}</div>
+                    </div>
+                    <div class="status-badge ${getStatusClass(server.status)}">${server.status}</div>
+                </div>
+                <div class="server-ip">IP : ${server.ip_address}</div>
+                <div style="margin-top:0.5rem;font-size:0.78rem;color:var(--text-secondary);">System Name : <span style="color:var(--text-primary);">${sysName}</span></div>
+                <div style="font-size:0.78rem;color:var(--text-secondary);">Software : <span style="color:var(--accent-color);font-weight:500;">QFACE</span> <span style="color:var(--text-primary);">v${version}</span></div>
+                <div style="font-size:0.78rem;color:var(--text-secondary);">License : <span style="color:var(--text-primary);">${license}</span></div>
+                <div style="font-size:0.78rem;color:var(--text-secondary);">Functions : <span style="color:var(--text-primary);">${functions}</span></div>
+                ${errHtml}
+                <div style="margin-top:0.5rem;font-size:0.8rem;color:var(--text-secondary);display:flex;justify-content:space-between;align-items:center;">
+                    <span>Tasks : ${st.total_tasks}</span>
+                    <button class="btn-toggle-cams" onclick="toggleQFaceTasks(this)" style="background:none;border:none;color:var(--accent-color);cursor:pointer;">▼ Show</button>
+                </div>
+                <div class="server-cameras-list" style="display:none;margin-top:0.5rem;font-size:0.8rem;background:rgba(0,0,0,0.2);padding:0.5rem;border-radius:6px;">
+                    <ul style="list-style:none;padding:0;margin:0;max-height:160px;overflow-y:auto;display:flex;flex-direction:column;gap:0.3rem;">
+                        ${taskRows || '<li style="color:var(--text-secondary);text-align:center;padding:0.5rem 0;">No tasks</li>'}
+                    </ul>
+                </div>
+                <div class="server-card-actions">
+                    <button class="btn-sysinfo" onclick="openSysinfoModal('${server.name}')">系統狀態</button>
+                    <button class="btn-edit" onclick="openServerModal('${server.name}')">Edit</button>
+                    <button class="btn-delete" onclick="deleteServer('${server.name}')">Delete</button>
+                </div>`;
+            container.appendChild(card);
+            return; // 跳過 QVR 渲染
+        }
+
+        // ── QVR 伺服器卡片 ────────────────────────────────────────────────────
+        const isOffline = server.status.toUpperCase() !== 'ONLINE';
+        const enclosures = server.disk_smart || [];
+        const hasDiskAlert = enclosures.some(e => (e.warnings||[]).length > 0 || (e.errors||[]).length > 0);
+        const blinkClass = isOffline ? 'blinking-border'
+            : hasDiskAlert ? 'blinking-border-warning' : '';
         card.className = `server-card ${blinkClass}`;
 
         let camerasHtml = '';
@@ -100,12 +219,17 @@ function renderServers(servers) {
                 const days = c.normal_rec_days || 0;
                 stats[days] = (stats[days] || 0) + 1;
             });
-            const sortedDays = Object.keys(stats).map(Number).sort((a, b) => b - a);
-            const statsItems = sortedDays.map(days => {
-                return `${days} 天 : <strong style="color: var(--text-primary);">${stats[days]}</strong> 支`;
-            }).join(' <span style="color:var(--text-secondary);">/</span> ');
-
-            recDaysStatsHtml = `<div style="margin-top: 0.5rem; font-size: 0.8rem; color: var(--text-secondary); line-height: 1.4;">錄影天數 [ ${statsItems} ]</div>`;
+            const sortedDays = Object.keys(stats).map(Number).sort((a, b) => b - a).slice(0, 4);
+            const chips = sortedDays.map(days => {
+                const count = stats[days];
+                return `<span style="display:inline-flex;align-items:center;gap:0.15rem;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:5px;padding:0.12rem 0.45rem;font-size:0.72rem;white-space:nowrap;">
+                    <span style="color:var(--text-secondary);">${days}d</span><span style="color:var(--text-primary);font-weight:700;margin-left:0.1rem;">×${count}</span>
+                </span>`;
+            }).join('');
+            recDaysStatsHtml = `<div style="margin-top:0.65rem;">
+                <div style="font-size:0.65rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:0.3rem;">錄影天數</div>
+                <div style="display:flex;flex-wrap:wrap;gap:0.25rem;">${chips}</div>
+            </div>`;
 
             // Build camera list HTML
             camerasHtml = server.cameras.map(c => {
@@ -135,13 +259,14 @@ function renderServers(servers) {
                 pools.map(p => {
                     const pct = Math.min(p.percent, 100);
                     const barColor = pct >= 90 ? 'var(--danger-color)' : pct >= 75 ? 'var(--warning-color)' : 'var(--success-color)';
-                    return `<div style="margin-bottom:0.2rem;">
-                        <div style="display:flex;justify-content:space-between;font-size:0.72rem;color:var(--text-secondary);margin-bottom:0.1rem;">
+                    const barGlow = pct >= 90 ? `box-shadow:0 0 8px ${barColor};` : '';
+                    return `<div style="margin-bottom:0.25rem;">
+                        <div style="display:flex;justify-content:space-between;font-size:0.72rem;color:var(--text-secondary);margin-bottom:0.15rem;">
                             <span style="font-weight:500;color:var(--text-primary);">Pool ${p.pool_id}</span>
                             <span>${p.freesize} 可用 / ${p.capacity} (${p.percent}%)</span>
                         </div>
-                        <div style="background:rgba(255,255,255,0.08);border-radius:4px;height:5px;overflow:hidden;">
-                            <div style="width:${pct}%;height:100%;background:${barColor};border-radius:4px;transition:width 0.4s;"></div>
+                        <div style="background:rgba(255,255,255,0.08);border-radius:6px;height:7px;overflow:hidden;">
+                            <div style="width:${pct}%;height:100%;background:${barColor};border-radius:6px;transition:width 0.4s;${barGlow}"></div>
                         </div>
                     </div>`;
                 }).join('') +
@@ -153,40 +278,89 @@ function renderServers(servers) {
                 diskUsage.map(d => {
                     const pct = Math.min(d.percent, 100);
                     const barColor = pct >= 90 ? 'var(--danger-color)' : pct >= 75 ? 'var(--warning-color)' : 'var(--success-color)';
-                    return `<div style="margin-bottom:0.15rem;">
-                        <div style="display:flex;justify-content:space-between;font-size:0.72rem;color:var(--text-secondary);margin-bottom:0.1rem;">
+                    const barGlow = pct >= 90 ? `box-shadow:0 0 8px ${barColor};` : '';
+                    return `<div style="margin-bottom:0.2rem;">
+                        <div style="display:flex;justify-content:space-between;font-size:0.72rem;color:var(--text-secondary);margin-bottom:0.15rem;">
                             <span style="font-weight:500;color:var(--text-primary);">${d.name}</span>
                             <span>${fmtGB(d.used_gb)} / ${fmtGB(d.total_gb)} (${d.percent}%)</span>
                         </div>
-                        <div style="background:rgba(255,255,255,0.08);border-radius:4px;height:5px;overflow:hidden;">
-                            <div style="width:${pct}%;height:100%;background:${barColor};border-radius:4px;transition:width 0.4s;"></div>
+                        <div style="background:rgba(255,255,255,0.08);border-radius:6px;height:7px;overflow:hidden;">
+                            <div style="width:${pct}%;height:100%;background:${barColor};border-radius:6px;transition:width 0.4s;${barGlow}"></div>
                         </div>
                     </div>`;
                 }).join('') +
                 '</div>';
         }
 
-        // 硬碟異常 HTML
-        const smartAlerts = server.disk_smart || [];
+        // 硬碟狀態 HTML：分兩個獨立區塊
+        // 區塊 1（紅色）：有 disk 問題的 enclosure（Host 或 External）
+        // 區塊 2（白色）：健康的 External enclosure（bays>0，無問題）
+        const enclLabel = e => {
+            const isHost = e.id === '0' || e.id === 0;
+            const loc    = isHost ? 'Host' : `External ${e.id}`;
+            const model  = e.model ? ' - ' + e.model : '';
+            const bay    = !isHost ? ` &nbsp;·&nbsp; ${e.total_bays} Bay` : '';
+            return `${loc}${model}${bay}`;
+        };
+
+        const alertEnclosures   = enclosures.filter(e => (e.warnings||[]).length > 0 || (e.errors||[]).length > 0);
+        const healthyExternals  = enclosures.filter(e => {
+            const isExternal = e.id !== '0' && e.id !== 0;
+            const hasIssues  = (e.warnings||[]).length > 0 || (e.errors||[]).length > 0;
+            return isExternal && !hasIssues && (e.total_bays || 0) > 0;
+        });
+
         let smartHtml = '';
-        if (smartAlerts.length > 0) {
-            const items = smartAlerts.map(d =>
-                `<div style="display:flex;align-items:center;gap:0.4rem;font-size:0.75rem;">
-                    <span style="color:var(--danger-color);">⚠</span>
-                    <span style="color:var(--text-secondary);">硬碟</span>
-                    <span style="font-weight:600;color:var(--text-primary);">${d.slot}</span>
-                    <span style="color:var(--danger-color);">${d.label}</span>
+
+        // ── 異常區塊（紅色） ──────────────────────────────
+        if (alertEnclosures.length > 0) {
+            const alertRows = alertEnclosures.map(e => {
+                const isHost = e.id === '0' || e.id === 0;
+                const diskItems = [
+                    ...(e.errors || []).map(d =>
+                        `<div style="display:flex;align-items:center;gap:0.35rem;font-size:0.72rem;">
+                            <span style="color:var(--danger-color);">✕</span>
+                            <span style="color:var(--text-secondary);">硬碟 ${d.slot}</span>
+                            <span style="color:var(--danger-color);font-weight:600;">${d.label}</span>
+                        </div>`),
+                    ...(e.warnings || []).map(d =>
+                        `<div style="display:flex;align-items:center;gap:0.35rem;font-size:0.72rem;">
+                            <span style="color:var(--warning-color);">⚠</span>
+                            <span style="color:var(--text-secondary);">硬碟 ${d.slot}</span>
+                            <span style="color:var(--warning-color);font-weight:600;">${d.label}</span>
+                        </div>`),
+                ].join('');
+                return `<div style="margin-bottom:0.2rem;">
+                    <div style="font-size:0.68rem;color:var(--danger-color);font-weight:600;">
+                        ${enclLabel(e)}${isHost ? ` &nbsp;·&nbsp; ${e.total_bays} Bay` : ''}
+                    </div>
+                    ${diskItems}
+                </div>`;
+            }).join('');
+            smartHtml += `<div style="margin-top:0.5rem;padding:0.5rem 0.75rem;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.35);border-radius:6px;display:flex;flex-direction:column;gap:0.15rem;">
+                <span style="font-size:0.68rem;color:var(--danger-color);text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">硬碟狀態警示</span>
+                ${alertRows}
+            </div>`;
+        }
+
+        // ── 擴充主機區塊（白色，無異常） ────────────────────
+        if (healthyExternals.length > 0) {
+            const extRows = healthyExternals.map(e =>
+                `<div style="font-size:0.68rem;color:var(--text-primary);font-weight:600;">
+                    擴充主機 ─ ${enclLabel(e)}
                 </div>`
             ).join('');
-            smartHtml = `<div style="margin-top:0.5rem;padding:0.5rem 0.75rem;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:6px;display:flex;flex-direction:column;gap:0.25rem;">
-                <span style="font-size:0.68rem;color:var(--danger-color);text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">硬碟異常</span>
-                ${items}
+            smartHtml += `<div style="margin-top:0.4rem;padding:0.5rem 0.75rem;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.12);border-radius:6px;display:flex;flex-direction:column;gap:0.15rem;">
+                ${extRows}
             </div>`;
         }
 
         card.innerHTML = `
             <div class="server-header">
-                <div class="server-name">${server.name}</div>
+                <div style="display:flex;align-items:center;gap:0.4rem;">
+                    <span style="font-size:0.62rem;font-weight:700;padding:0.12rem 0.38rem;border-radius:4px;background:rgba(59,130,246,0.15);color:var(--accent-color);border:1px solid rgba(59,130,246,0.3);text-transform:uppercase;letter-spacing:0.05em;">QVR</span>
+                    <div class="server-name">${server.name}</div>
+                </div>
                 <div class="status-badge ${getStatusClass(server.status)}">${server.status}</div>
             </div>
             <div class="server-ip">IP : ${server.ip_address}</div>
@@ -204,7 +378,7 @@ function renderServers(servers) {
                 </ul>
             </div>
             <div class="server-card-actions">
-                <button class="btn-sysinfo" onclick="openSysinfoModal('${server.name}')">系統身分證</button>
+                <button class="btn-sysinfo" onclick="openSysinfoModal('${server.name}')">系統狀態</button>
                 <button class="btn-edit" onclick="openServerModal('${server.name}')">Edit</button>
                 <button class="btn-delete" onclick="deleteServer('${server.name}')">Delete</button>
             </div>
@@ -214,6 +388,17 @@ function renderServers(servers) {
 }
 
 window.toggleCameras = function (btn) {
+    const list = btn.parentElement.nextElementSibling;
+    if (list.style.display === 'none') {
+        list.style.display = 'block';
+        btn.textContent = '▲ Hide';
+    } else {
+        list.style.display = 'none';
+        btn.textContent = '▼ Show';
+    }
+}
+
+window.toggleQFaceTasks = function (btn) {
     const list = btn.parentElement.nextElementSibling;
     if (list.style.display === 'none') {
         list.style.display = 'block';
@@ -237,6 +422,7 @@ function renderCameras(servers) {
 
         let camerasHtml = '';
         let hasAbnormalCamera = false;
+        let offlineCamCount = 0;
 
         server.cameras.forEach(cam => {
             const conn = getCameraConnectionLabel(cam.status);
@@ -245,6 +431,7 @@ function renderCameras(servers) {
             let cardBlinkClass = '';
             if (conn.label !== 'On Line' && conn.label !== 'IDLE') {
                 hasAbnormalCamera = true;
+                offlineCamCount++;
                 cardBlinkClass = 'blinking-border';
             }
 
@@ -302,9 +489,13 @@ function renderCameras(servers) {
         group.className = `server-camera-group ${blinkClass}`;
         group.dataset.hasAbnormal = hasAbnormalCamera ? 'true' : 'false';
 
+        const offlineBadgeHtml = offlineCamCount > 0
+            ? `<span style="display:inline-flex;align-items:center;gap:0.2rem;background:rgba(239,68,68,0.18);color:#f87171;border:1px solid rgba(239,68,68,0.4);border-radius:10px;padding:0.1rem 0.5rem;font-size:0.7rem;font-weight:600;margin-left:0.5rem;">⚠ ${offlineCamCount} Offline</span>`
+            : '';
+
         group.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none;" onclick="toggleCameraGrid(this, '${server.name}')">
-                <h3 style="margin: 0; color: var(--accent-color);">${server.name} Cameras</h3>
+                <h3 style="margin: 0; color: var(--accent-color); display:flex; align-items:center;">${server.name} Cameras${offlineBadgeHtml}</h3>
                 <span class="toggle-icon" style="color: var(--text-secondary); transition: transform 0.2s; transform: ${iconTransform};">▼</span>
             </div>
             <div class="camera-grid" style="margin-top: 1rem; display: ${gridDisplay};">
@@ -392,12 +583,14 @@ function renderServerAlarmPage(page) {
 
     const start = (page - 1) * SERVER_ALARM_PAGE_SIZE;
     serverAlarmBuffer.slice(start, start + SERVER_ALARM_PAGE_SIZE).forEach(alarm => {
-        const statusCls = alarm.status === 'Offline' ? 'status-offline' : 'status-warning';
+        const isOffline = alarm.status === 'Offline';
+        const statusCls = isOffline ? 'status-offline' : 'status-warning';
+        const icon = isOffline ? '✕ ' : '⚠ ';
         const tr = document.createElement('tr');
         tr.innerHTML = `
             <td>${alarm.server_name}</td>
             <td>${alarm.ip_address}</td>
-            <td><span class="status-badge ${statusCls}">${alarm.status}</span></td>
+            <td><span class="status-badge ${statusCls}">${icon}${alarm.status}</span></td>
             <td>${alarm.timestamp}</td>
         `;
         tbody.appendChild(tr);
@@ -444,11 +637,12 @@ function renderAlarmPage(page) {
     pageItems.forEach(alarm => {
         const tr = document.createElement('tr');
         const conn = getCameraConnectionLabel(alarm.camera_status);
+        const icon = conn.cls === 'status-offline' ? '✕ ' : '⚠ ';
         tr.innerHTML = `
             <td>${alarm.server_name}</td>
             <td>${alarm.camera_index}</td>
             <td>${alarm.camera_name}</td>
-            <td><span class="status-badge ${conn.cls}">${conn.label}</span></td>
+            <td><span class="status-badge ${conn.cls}">${icon}${conn.label}</span></td>
             <td>${alarm.timestamp}</td>
         `;
         tbody.appendChild(tr);
@@ -490,6 +684,7 @@ async function openServerModal(serverName = null) {
         const configs = await fetch('/api/server_configs').then(r => r.json());
         const cfg = configs.find(c => c.name === serverName);
         if (cfg) {
+            document.getElementById('field-software-type').value = cfg.software_type || 'qvr';
             document.getElementById('field-name').value = cfg.name;
             document.getElementById('field-ip').value = cfg.ip_address;
             document.getElementById('field-port').value = cfg.port;
@@ -498,6 +693,7 @@ async function openServerModal(serverName = null) {
         }
     } else {
         title.textContent = 'Add QVR Server';
+        document.getElementById('field-software-type').value = 'qvr';
         document.getElementById('field-name').value = '';
         document.getElementById('field-ip').value = '';
         document.getElementById('field-port').value = '8080';
@@ -515,6 +711,7 @@ function closeServerModal() {
 
 async function saveServerConfig() {
     const payload = {
+        software_type: document.getElementById('field-software-type').value,
         name: document.getElementById('field-name').value.trim(),
         ip_address: document.getElementById('field-ip').value.trim(),
         port: parseInt(document.getElementById('field-port').value) || 8080,
@@ -571,7 +768,7 @@ document.getElementById('server-modal-overlay').addEventListener('click', e => {
 // ── System Info Modal ────────────────────────────────────────────────────────
 
 async function openSysinfoModal(serverName) {
-    document.getElementById('sysinfo-modal-title').textContent = `系統身分證 ─ ${serverName}`;
+    document.getElementById('sysinfo-modal-title').textContent = `系統狀態 ─ ${serverName}`;
     document.getElementById('sysinfo-content').innerHTML =
         '<div style="text-align:center;color:var(--text-secondary);padding:2rem;">讀取中...</div>';
     document.getElementById('sysinfo-modal-overlay').style.display = 'flex';
@@ -609,13 +806,91 @@ function renderSysinfoContent(data) {
     const uptime = `${s.uptime_day || 0}d ${s.uptime_hour || 0}h ${s.uptime_min || 0}m ${s.uptime_sec || 0}s`;
     const fmtGB = gb => gb >= 1024 ? (gb / 1024).toFixed(1) + ' TB' : gb.toFixed(1) + ' GB';
 
+    // 將 KB 值自動換算為最適合的單位
+    const fmtKB = kb => {
+        if (kb === null || kb === undefined) return 'N/A';
+        const G = 1024, M = G * 1024, T = M * 1024, P = T * 1024;
+        if (kb >= P) return (kb / P).toFixed(2) + ' PB';
+        if (kb >= T) return (kb / T).toFixed(2) + ' TB';
+        if (kb >= M) return (kb / M).toFixed(1) + ' GB';
+        if (kb >= G) return (kb / G).toFixed(0) + ' MB';
+        return kb.toFixed(0) + ' KB';
+    };
+
     const box = (label, value) =>
         `<div class="sysinfo-box"><span class="sysinfo-box-label">${label}</span><span class="sysinfo-box-value">${value}</span></div>`;
 
     const fullRow = (content) =>
         `<div class="sysinfo-full">${content}</div>`;
 
-    const divider = () => '<div class="sysinfo-divider"></div>';
+    // ── QFACE 系統狀態 ──────────────────────────────────────────────────────
+    if (data.software_type === 'qface') {
+        const ab      = data.qface_about || {};
+        const st      = data.qface_stream_tasks || { total_tasks: 0, tasks: [] };
+        const isOk    = ab.error_code === 0;
+        const funcs   = (ab.functions || []).join(', ') || '-';
+        const license = ab.codec_license || '-';
+
+        const statusBox = isOk
+            ? `<div class="sysinfo-box" style="gap:0.3rem;">
+                   <span class="sysinfo-box-label">Status</span>
+                   <span class="status-badge status-online" style="width:fit-content;">正常</span>
+               </div>`
+            : `<div class="sysinfo-box blinking-border" style="background:rgba(239,68,68,0.06);gap:0.3rem;">
+                   <span class="sysinfo-box-label" style="color:var(--danger-color);">Status</span>
+                   <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+                       <span class="status-badge status-offline">異常 (${ab.error_code})</span>
+                       <span style="font-size:0.82rem;color:var(--danger-color);">${ab.error_message || ''}</span>
+                   </div>
+               </div>`;
+
+        const taskTableRows = (st.tasks || []).map(t => {
+            const ms   = getQFaceMediaStatus(t.media_status);
+            const evts = t.events.length > 0 ? t.events.join(', ') : '-';
+            return `<tr>
+                <td style="font-size:0.82rem;">${t.camera_name || '-'}</td>
+                <td style="font-size:0.82rem;color:var(--text-secondary);">${t.ip_address || '-'}</td>
+                <td><span class="status-badge ${ms.cls}" style="font-size:0.72rem;">${ms.label}</span></td>
+                <td style="font-size:0.78rem;color:var(--text-secondary);">
+                    <span style="color:var(--accent-color);font-weight:600;">${t.total_events}</span>
+                    &nbsp;<span style="font-size:0.72rem;">${evts}</span>
+                </td>
+            </tr>`;
+        }).join('');
+
+        const tasksSection = `
+            <div class="sysinfo-full">
+                <div class="sysinfo-box" style="gap:0.5rem;padding:0.75rem 1rem;">
+                    <span class="sysinfo-box-label" style="margin-bottom:0.25rem;">Stream Tasks (${st.total_tasks})</span>
+                    ${st.tasks.length > 0
+                        ? `<div style="overflow-x:auto;">
+                               <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+                                   <thead>
+                                       <tr style="border-bottom:1px solid var(--glass-border);">
+                                           <th style="text-align:left;padding:0.3rem 0.5rem;font-size:0.72rem;color:var(--text-secondary);font-weight:500;">Camera</th>
+                                           <th style="text-align:left;padding:0.3rem 0.5rem;font-size:0.72rem;color:var(--text-secondary);font-weight:500;">IP</th>
+                                           <th style="text-align:left;padding:0.3rem 0.5rem;font-size:0.72rem;color:var(--text-secondary);font-weight:500;">Status</th>
+                                           <th style="text-align:left;padding:0.3rem 0.5rem;font-size:0.72rem;color:var(--text-secondary);font-weight:500;">Events</th>
+                                       </tr>
+                                   </thead>
+                                   <tbody>${taskTableRows}</tbody>
+                               </table>
+                           </div>`
+                        : `<div style="color:var(--text-secondary);font-size:0.85rem;padding:0.25rem 0;">No tasks available.</div>`}
+                </div>
+            </div>`;
+
+        document.getElementById('sysinfo-content').innerHTML = `
+            <div class="sysinfo-grid">
+                ${box('Server Name', ab.server_name || '-')}
+                ${box('Version', ab.version || '-')}
+                ${box('License', license)}
+                ${fullRow(statusBox)}
+                ${fullRow(box('System', funcs))}
+                ${tasksSection}
+            </div>`;
+        return;
+    }
 
     let memHtml = 'N/A';
     if (m.total) {
@@ -623,7 +898,7 @@ function renderSysinfoContent(data) {
         const barColor = pct >= 90 ? 'var(--danger-color)' : pct >= 70 ? 'var(--warning-color)' : 'var(--success-color)';
         memHtml = `
             <div style="display:flex;flex-direction:column;gap:0.35rem;width:100%; margin-top:0.25rem;">
-                <span class="sysinfo-box-value">${m.used} / ${m.total} MB (${pct}%)</span>
+                <span class="sysinfo-box-value">${fmtKB(m.used)} / ${fmtKB(m.total)} (${pct}%)</span>
                 <div style="background:rgba(255,255,255,0.08);border-radius:4px;height:6px;overflow:hidden;">
                     <div style="width:${pct}%;height:100%;background:${barColor};border-radius:4px;"></div>
                 </div>
@@ -676,19 +951,58 @@ function renderSysinfoContent(data) {
     }
 
     let smartRows = '';
-    if (smartAlerts.length > 0) {
-        const items = smartAlerts.map(d =>
-            `<div style="display:flex;align-items:center;gap:0.5rem;font-size:0.8rem;">
-                <span style="color:var(--danger-color);">⚠</span>
-                <span style="color:var(--text-secondary);">硬碟</span>
-                <span style="font-weight:600;color:var(--text-primary);">${d.slot}</span>
-                <span class="status-badge status-offline">${d.label}</span>
+    const modalEnclLabel = e => {
+        const isHost = e.id === '0' || e.id === 0;
+        const loc    = isHost ? 'Host' : `External ${e.id}`;
+        const model  = e.model ? ' - ' + e.model : '';
+        const bay    = !isHost ? ` · ${e.total_bays} Bay` : '';
+        return `${loc}${model}${bay}`;
+    };
+    const modalAlerts   = smartAlerts.filter(e => (e.warnings||[]).length > 0 || (e.errors||[]).length > 0);
+    const modalHealthy  = smartAlerts.filter(e => {
+        const isExternal = e.id !== '0' && e.id !== 0;
+        const hasIssues  = (e.warnings||[]).length > 0 || (e.errors||[]).length > 0;
+        return isExternal && !hasIssues && (e.total_bays || 0) > 0;
+    });
+
+    // 異常區塊（紅色）
+    if (modalAlerts.length > 0) {
+        const alertBlocks = modalAlerts.map(e => {
+            const isHost = e.id === '0' || e.id === 0;
+            const diskItems = [
+                ...(e.errors || []).map(d =>
+                    `<div style="display:flex;align-items:center;gap:0.5rem;font-size:0.82rem;">
+                        <span style="color:var(--danger-color);">✕</span>
+                        <span style="color:var(--text-secondary);">硬碟 ${d.slot}</span>
+                        <span class="status-badge status-offline">${d.label}</span>
+                    </div>`),
+                ...(e.warnings || []).map(d =>
+                    `<div style="display:flex;align-items:center;gap:0.5rem;font-size:0.82rem;">
+                        <span style="color:var(--warning-color);">⚠</span>
+                        <span style="color:var(--text-secondary);">硬碟 ${d.slot}</span>
+                        <span class="status-badge status-warning">${d.label}</span>
+                    </div>`),
+            ].join('');
+            return `<div class="sysinfo-box blinking-border" style="background:rgba(239,68,68,0.06);gap:0.4rem;">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <span class="sysinfo-box-label" style="color:var(--danger-color);">硬碟異常 ─ ${modalEnclLabel(e)}</span>
+                    ${isHost ? `<span style="font-size:0.75rem;color:var(--text-secondary);">${e.total_bays} Bay</span>` : ''}
+                </div>
+                ${diskItems}
+            </div>`;
+        }).join('');
+        smartRows += fullRow(alertBlocks);
+    }
+
+    // 擴充主機區塊（白色，無異常）
+    if (modalHealthy.length > 0) {
+        const healthyBlocks = modalHealthy.map(e =>
+            `<div class="sysinfo-box" style="border-color:rgba(255,255,255,0.12);background:rgba(255,255,255,0.02);gap:0.25rem;">
+                <span class="sysinfo-box-label">擴充主機</span>
+                <span class="sysinfo-box-value" style="font-size:0.85rem;">${modalEnclLabel(e)}</span>
             </div>`
         ).join('');
-        smartRows = fullRow(`<div class="sysinfo-box" style="border-color:rgba(239,68,68,0.4);background:rgba(239,68,68,0.08);">
-            <span class="sysinfo-box-label" style="color:var(--danger-color);">硬碟異常</span>
-            ${items}
-        </div>`);
+        smartRows += fullRow(healthyBlocks);
     }
 
     document.getElementById('sysinfo-content').innerHTML = `
@@ -709,28 +1023,88 @@ function renderSysinfoContent(data) {
 
 // ── Logs Modal ───────────────────────────────────────────────────────────────
 
+let _logsState    = { type: 'camera', offset: 0, loading: false, hasMore: true };
+let _logsObserver = null;
+
 async function openLogsModal(type = 'camera') {
+    // 重設狀態
+    _logsState = { type, offset: 0, loading: false, hasMore: true };
+
     document.getElementById('logs-modal-overlay').style.display = 'flex';
     const content = document.getElementById('logs-content');
-    const title = document.querySelector('#logs-modal-overlay .modal-header h3');
+    const title   = document.querySelector('#logs-modal-overlay .modal-header h3');
     title.textContent = (type === 'camera' ? 'Camera' : 'Server') + ' Alarm Log History (Up to 14 days)';
-    content.innerHTML = 'Fetching logs...';
+
+    // 清空並建立結構：<pre> 放文字、<div> sentinel 偵測捲動底部
+    content.innerHTML =
+        '<pre id="logs-text" style="margin:0;font-size:0.88rem;line-height:1.5;white-space:pre-wrap;word-break:break-all;"></pre>' +
+        '<div id="logs-sentinel" style="height:4px;"></div>';
+
+    // 斷開舊的 observer
+    if (_logsObserver) { _logsObserver.disconnect(); _logsObserver = null; }
+
+    // 載入第一批
+    await _fetchMoreLogs(content);
+
+    // 設定 IntersectionObserver：sentinel 進入可見區時觸發下一批
+    const sentinel = document.getElementById('logs-sentinel');
+    _logsObserver = new IntersectionObserver(entries => {
+        if (entries[0].isIntersecting && _logsState.hasMore && !_logsState.loading) {
+            _fetchMoreLogs(content);
+        }
+    }, { root: content, rootMargin: '0px 0px 60px 0px', threshold: 0 });
+    _logsObserver.observe(sentinel);
+}
+
+async function _fetchMoreLogs(content) {
+    if (_logsState.loading || !_logsState.hasMore) return;
+    _logsState.loading = true;
+
+    // 顯示 loading 提示（插在 sentinel 之前）
+    const sentinel = document.getElementById('logs-sentinel');
+    const loader   = document.createElement('div');
+    loader.id = 'logs-loader';
+    loader.style.cssText = 'text-align:center;color:var(--text-secondary);padding:0.4rem;font-size:0.82rem;';
+    loader.textContent = '載入中…';
+    content.insertBefore(loader, sentinel);
 
     try {
-        const response = await fetch(`/api/alarm_logs?type=${type}`);
-        const data = await response.json();
+        const res  = await fetch(`/api/alarm_logs?type=${_logsState.type}&offset=${_logsState.offset}&limit=100`);
+        const data = await res.json();
+
+        document.getElementById('logs-loader')?.remove();
+
+        const logsText = document.getElementById('logs-text');
         if (data.logs && data.logs.length > 0) {
-            content.textContent = data.logs.join('\n');
+            logsText.textContent += data.logs.join('\n') + '\n';
+            _logsState.offset  += data.logs.length;
+            _logsState.hasMore  = data.has_more;
+
+            // 顯示進度（非最後一批才顯示）
+            if (_logsState.hasMore) {
+                const hint = document.createElement('div');
+                hint.style.cssText = 'text-align:center;color:var(--text-secondary);font-size:0.78rem;padding:0.2rem 0;';
+                hint.textContent   = `已載入 ${_logsState.offset} / ${data.total} 筆`;
+                content.insertBefore(hint, sentinel);
+            }
         } else {
-            content.textContent = 'No logs available.';
+            _logsState.hasMore = false;
+            if (_logsState.offset === 0) {
+                logsText.textContent = 'No logs available.';
+            }
         }
-    } catch (error) {
-        console.error('Error fetching logs:', error);
-        content.textContent = 'Failed to load logs.';
+    } catch (e) {
+        console.error('Error fetching logs:', e);
+        document.getElementById('logs-loader')?.remove();
+        const logsText = document.getElementById('logs-text');
+        if (_logsState.offset === 0) logsText.textContent = 'Failed to load logs.';
     }
+
+    _logsState.loading = false;
 }
 
 function closeLogsModal() {
+    if (_logsObserver) { _logsObserver.disconnect(); _logsObserver = null; }
     document.getElementById('logs-modal-overlay').style.display = 'none';
 }
 

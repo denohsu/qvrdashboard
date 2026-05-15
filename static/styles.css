@@ -78,6 +78,54 @@ header h1 {
     -webkit-text-fill-color: transparent;
 }
 
+.header-right {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.4rem;
+}
+
+.refresh-control {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.refresh-label {
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+}
+
+.refresh-control select {
+    background: rgba(15, 23, 42, 0.8);
+    border: 1px solid var(--glass-border);
+    border-radius: 6px;
+    padding: 0.25rem 1.8rem 0.25rem 0.6rem;
+    color: var(--text-primary);
+    font-size: 0.8rem;
+    font-weight: 500;
+    outline: none;
+    cursor: pointer;
+    transition: border-color 0.2s;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.5rem center;
+}
+
+.refresh-control select:focus {
+    border-color: var(--accent-color);
+}
+
+.refresh-control select option {
+    background: #1e293b;
+    color: var(--text-primary);
+}
+
 #last-updated {
     font-size: 0.875rem;
     color: var(--text-secondary);
@@ -99,7 +147,7 @@ h2 {
 .server-card {
     background: rgba(15, 23, 42, 0.6);
     border-radius: 12px;
-    padding: 1.25rem;
+    padding: 1.4rem 1.5rem;
     border: 1px solid var(--glass-border);
     transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
@@ -137,6 +185,8 @@ h2 {
 .server-ip {
     color: var(--text-secondary);
     font-size: 0.875rem;
+    margin-top: 0.25rem;
+    line-height: 1.5;
 }
 
 /* Camera Stats Bar */
@@ -162,8 +212,8 @@ h2 {
     background: rgba(15, 23, 42, 0.6);
     border: 1px solid var(--glass-border);
     border-radius: 10px;
-    padding: 0.75rem 1rem;
-    gap: 0.3rem;
+    padding: 0.9rem 1rem;
+    gap: 0.35rem;
 }
 
 
@@ -176,13 +226,26 @@ h2 {
 }
 
 .stat-item-value {
-    font-size: 1.6rem;
-    font-weight: 700;
+    font-size: 2.1rem;
+    font-weight: 800;
     color: var(--text-primary);
+    letter-spacing: -0.02em;
+    transition: text-shadow 0.3s;
 }
 
 .stat-green { color: var(--success-color); }
-.stat-red   { color: var(--danger-color); }
+.stat-red   { color: #f87171; }
+
+.stats-section-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding: 0.15rem 0.5rem;
+    margin-bottom: 0.4rem;
+    border-left: 3px solid var(--accent-color);
+}
 
 /* Cameras */
 .list-container {
@@ -199,14 +262,14 @@ h2 {
 }
 
 @keyframes borderBlink {
-    0% { border-color: rgba(255, 255, 255, 0.05); box-shadow: none; }
-    50% { border-color: var(--danger-color); box-shadow: 0 0 15px rgba(239, 68, 68, 0.4); }
+    0%   { border-color: rgba(255, 255, 255, 0.05); box-shadow: none; }
+    50%  { border-color: var(--danger-color);        box-shadow: 0 0 0 2px var(--danger-color), 0 0 22px rgba(239, 68, 68, 0.7), inset 0 0 10px rgba(239, 68, 68, 0.18); }
     100% { border-color: rgba(255, 255, 255, 0.05); box-shadow: none; }
 }
 
 @keyframes borderBlinkWarning {
-    0% { border-color: rgba(255, 255, 255, 0.05); box-shadow: none; }
-    50% { border-color: var(--warning-color); box-shadow: 0 0 15px rgba(245, 158, 11, 0.5); }
+    0%   { border-color: rgba(255, 255, 255, 0.05); box-shadow: none; }
+    50%  { border-color: var(--warning-color);       box-shadow: 0 0 0 2px var(--warning-color), 0 0 22px rgba(245, 158, 11, 0.7), inset 0 0 10px rgba(245, 158, 11, 0.15); }
     100% { border-color: rgba(255, 255, 255, 0.05); box-shadow: none; }
 }
 
@@ -396,7 +459,8 @@ tbody tr:hover {
     letter-spacing: 0.04em;
 }
 
-.form-group input {
+.form-group input,
+.form-group select {
     background: rgba(15, 23, 42, 0.8);
     border: 1px solid var(--glass-border);
     border-radius: 8px;
@@ -407,7 +471,23 @@ tbody tr:hover {
     transition: border-color 0.2s;
 }
 
-.form-group input:focus {
+.form-group select {
+    appearance: none;
+    -webkit-appearance: none;
+    cursor: pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.85rem center;
+    padding-right: 2.2rem;
+}
+
+.form-group select option {
+    background: #1e293b;
+    color: var(--text-primary);
+}
+
+.form-group input:focus,
+.form-group select:focus {
     border-color: var(--accent-color);
 }
 
