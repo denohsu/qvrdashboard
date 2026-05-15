@@ -1,8 +1,32 @@
 import base64
+import json
+import os
 import requests
 import re
 import urllib.parse
 from typing import Optional, Dict, Any, List
+
+# SID 快取檔路徑（與 qvrapi.py 同目錄）
+_SID_CACHE_PATH = os.path.join(os.path.dirname(__file__), "sid_cache.json")
+
+
+def _load_sid_cache() -> dict:
+    if os.path.exists(_SID_CACHE_PATH):
+        try:
+            with open(_SID_CACHE_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def _save_sid_cache(cache: dict):
+    try:
+        with open(_SID_CACHE_PATH, "w", encoding="utf-8") as f:
+            json.dump(cache, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"[sid_cache] 寫入失敗: {e}")
+
 
 class QVRApi:
     def __init__(self, ip_address: str, port: int, username: str, password_base64: str):
@@ -11,8 +35,12 @@ class QVRApi:
         self.username = username
         self.password = password_base64
         self.base_url = f"http://{self.ip_address}:{self.port}"
-        self.sid = None
         self._qvr_prefix = None
+        self._cache_key = f"{ip_address}:{port}:{username}"
+
+        # 從快取還原 SID（尚未驗證有效性，get_sid() 呼叫時才 renew）
+        cache = _load_sid_cache()
+        self.sid = cache.get(self._cache_key)
 
     def get_qvr_prefix(self) -> str:
         """從 /qvrentry 取得 fw_web_ui_prefix，自動適應 QVR Pro / QVR Elite"""
@@ -67,7 +95,10 @@ class QVRApi:
         return response
 
     def get_sid(self) -> Optional[str]:
-        """取得 SID 方式"""
+        """取得 SID：優先 renew 快取 SID，失效才重新登入，成功後存入快取。"""
+        if self.sid and self.renew_sid():
+            return self.sid
+
         params = {
             "user": self.username,
             "serviceKey": "1",
@@ -78,11 +109,20 @@ class QVRApi:
             match = re.search(r'<authSid>\s*<!\[CDATA\[(.*?)\]\]>\s*</?authSid>', response.text, re.IGNORECASE)
             if match:
                 self.sid = match.group(1)
+                self._save_sid()
                 return self.sid
             return None
         except requests.exceptions.RequestException as e:
             print(f"Error getting SID: {e}")
             return None
+
+    def _save_sid(self):
+        """將目前 SID 寫入快取檔。"""
+        cache = _load_sid_cache()
+        if cache.get(self._cache_key) != self.sid:
+            cache[self._cache_key] = self.sid
+            _save_sid_cache(cache)
+            print(f"[sid_cache] {self._cache_key} SID 已更新")
 
     def renew_sid(self) -> bool:
         """續用 SID 方式"""
@@ -131,6 +171,297 @@ class QVRApi:
         except ValueError:
             print("Failed to parse JSON response.")
             return None
+
+    def get_disk_usage(self) -> list:
+        """取得各磁碟使用空間，回傳 list of dict (name, total_gb, used_gb, free_gb, percent)。"""
+        if not self.sid:
+            print(f"[disk_usage][{self.ip_address}] 無 SID，略過")
+            return []
+
+        import time
+        import re
+        import xml.etree.ElementTree as ET
+
+        def _extract(text, tag):
+            """從 XML 文字中用 regex 擷取 tag 的值（支援 CDATA 與純文字，忽略換行空白）。"""
+            pattern = rf'<{tag}[^>]*>\s*(?:<!\[CDATA\[)?\s*([\d.]+)\s*(?:\]\]>)?\s*</{tag}>'
+            m = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+            return m.group(1).strip() if m else None
+
+        disks = []
+        for disk_select in ["System", "DataVol1", "DataVol2", "DataVol3"]:
+            params = {
+                "chart_func": "disk_usage",
+                "count": int(time.time()),
+                "disk_select": disk_select,
+            }
+            try:
+                resp = self._get("cgi-bin/management/chartReq.cgi", params=params)
+                raw = resp.text
+
+                print(f"[disk_usage][{self.ip_address}][{disk_select}] HTTP {resp.status_code} len={len(raw)}")
+                print(f"[disk_usage][{self.ip_address}][{disk_select}] RAW >>>\n{raw}\n<<<")
+
+                # chartReq.cgi for disk_usage might not return authPassed, so we rely on total_size presence
+
+                total_str = _extract(raw, "total_size")
+                free_str  = _extract(raw, "free_size")
+
+                if not total_str:
+                    all_tags = re.findall(r'<(\w+)[^>]*>\s*(?:<!\[CDATA\[)?\s*([\d.]+)\s*(?:\]\]>)?\s*</\1>', raw, re.DOTALL)
+                    print(f"[disk_usage][{self.ip_address}][{disk_select}] 找不到 total_size，數字型 tag: {all_tags[:20]}")
+                    continue
+
+                total_bytes = float(total_str)
+                free_bytes  = float(free_str) if free_str else 0.0
+
+                if total_bytes <= 0:
+                    continue
+
+                GB = 1024 ** 3
+                total_gb = total_bytes / GB
+                free_gb  = free_bytes  / GB
+                used_gb  = total_gb - free_gb
+
+                print(f"[disk_usage][{self.ip_address}][{disk_select}] total={total_gb:.1f}GB used={used_gb:.1f}GB free={free_gb:.1f}GB")
+
+                disks.append({
+                    "name":      disk_select,
+                    "total_gb":  round(total_gb, 1),
+                    "used_gb":   round(used_gb,  1),
+                    "free_gb":   round(free_gb,  1),
+                    "percent":   round(used_gb / total_gb * 100, 1),
+                })
+            except Exception as e:
+                print(f"[disk_usage][{self.ip_address}][{disk_select}] exception: {e}")
+        return disks
+
+    def get_disk_smart(self) -> list:
+        """
+        取得所有硬碟 SMART 狀態，回傳 hd_smart == 2（異常）的硬碟清單。
+        格式：[{"hd_no": "0001:0001", "hd_smart": "2", "label": "異常"}, ...]
+        """
+        if not self.sid:
+            return []
+
+        import re as _re
+
+        def _x(text, tag):
+            m = _re.search(
+                rf'<{_re.escape(tag)}[^>]*>\s*(?:<!\[CDATA\[)?\s*(.*?)\s*(?:\]\]>)?\s*</{_re.escape(tag)}>',
+                text, _re.IGNORECASE | _re.DOTALL)
+            return m.group(1).strip() if m else None
+
+        SMART_LABEL = {"0": "正常", "1": "警告", "2": "異常"}
+
+        try:
+            resp = self._get("cgi-bin/disk/disk_manage.cgi", params={"func": "get_all"})
+            raw  = resp.text
+        except Exception as e:
+            print(f"[disk_smart][{self.ip_address}] error: {e}")
+            return []
+
+        auth = _x(raw, "authPassed")
+        if auth != "1":
+            print(f"[disk_smart][{self.ip_address}] authPassed={auth}")
+            return []
+
+        # 自動偵測 Disk_Info block tag（不同韌體可能用不同 tag）
+        block_tag = None
+        for candidate in ["Disk_Info", "hd_info", "disk_info", "HDInfo"]:
+            if _re.search(rf'<{candidate}[\s>]', raw, _re.IGNORECASE):
+                block_tag = candidate
+                break
+
+        if not block_tag:
+            # 印出前 600 字元幫助排查
+            print(f"[disk_smart][{self.ip_address}] 找不到 Disk block tag，RAW前600:\n{raw[:600]}")
+            return []
+
+        print(f"[disk_smart][{self.ip_address}] 使用 block tag: <{block_tag}>")
+
+        # 結構：<Disk_Info> 內有多個 <row>，每個 <row> 代表一顆硬碟
+        rows = _re.findall(r'<row>(.*?)</row>', raw, _re.DOTALL | _re.IGNORECASE)
+        print(f"[disk_smart][{self.ip_address}] 找到 {len(rows)} 個 row")
+
+        abnormal = []
+        for row in rows:
+            hd_no    = _x(row, "hd_no")
+            hd_smart = _x(row, "hd_smart")
+
+            # 跳過無 hd_no 或無 hd_smart 的 row（slot header 不含 hd_smart）
+            if not hd_no or hd_smart is None:
+                continue
+
+            # hd_smart "0" = 正常，其他值均視為異常
+            if hd_smart != "0":
+                slot = int((hd_no.split(":")[-1] or "0"), 10)
+                abnormal.append({
+                    "hd_no":    hd_no,
+                    "slot":     slot,
+                    "hd_smart": hd_smart,
+                    "label":    SMART_LABEL.get(hd_smart, f"異常({hd_smart})"),
+                })
+
+        print(f"[disk_smart][{self.ip_address}] 異常硬碟數: {len(abnormal)}")
+        return abnormal
+
+    def get_system_info(self) -> dict | None:
+        """取得系統資訊 (sysinfo)，回傳 dict 或 None。"""
+        if not self.sid:
+            return None
+
+        import time as _time
+        import re as _re
+
+        def _x(text, tag):
+            m = _re.search(
+                rf'<{_re.escape(tag)}[^>]*>\s*(?:<!\[CDATA\[)?\s*(.*?)\s*(?:\]\]>)?\s*</{_re.escape(tag)}>',
+                text, _re.IGNORECASE | _re.DOTALL)
+            return m.group(1).strip() if m else None
+
+        def _xi(text, tag, default=0):
+            v = _x(text, tag)
+            try:
+                return int(v) if v else default
+            except Exception:
+                return default
+
+        params = {"subfunc": "sysinfo", "count": int(_time.time() * 1000)}
+        try:
+            resp = self._get("cgi-bin/management/manaRequest.cgi", params=params)
+            raw  = resp.text
+        except Exception as e:
+            print(f"[sysinfo][{self.ip_address}] error: {e}")
+            return None
+
+        if _x(raw, "authPassed") != "1":
+            print(f"[sysinfo][{self.ip_address}] authPassed 失敗")
+            return None
+
+        cpu_raw = (_x(raw, "cpu_usage") or "0").replace("%", "").strip()
+
+        return {
+            "server_name":   _x(raw,  "server_name"),
+            "serial_number": _x(raw,  "serial_number"),
+            "uptime_day":    _xi(raw, "uptime_day"),
+            "uptime_hour":   _xi(raw, "uptime_hour"),
+            "uptime_min":    _xi(raw, "uptime_min"),
+            "uptime_sec":    _xi(raw, "uptime_sec"),
+            "cpu_usage":     cpu_raw,
+            "cpu_tempc":     _x(raw,  "cpu_tempc"),
+            "sys_tempc":     _x(raw,  "sys_tempc"),
+            "disk_num":      _xi(raw, "disk_num"),
+            "ssd_num":       _xi(raw, "ssd_disk_num"),
+            "m2_num":        _xi(raw, "m2_disk_num"),
+        }
+
+    def get_memory_info(self) -> dict | None:
+        """取得記憶體使用狀況 (sysmonitor)，回傳 dict 或 None。"""
+        if not self.sid:
+            return None
+
+        import re as _re
+
+        def _x(text, tag):
+            m = _re.search(
+                rf'<{_re.escape(tag)}[^>]*>\s*(?:<!\[CDATA\[)?\s*(.*?)\s*(?:\]\]>)?\s*</{_re.escape(tag)}>',
+                text, _re.IGNORECASE | _re.DOTALL)
+            return m.group(1).strip() if m else None
+
+        def _xi(text, tag, default=0):
+            v = _x(text, tag)
+            try:
+                return int(v) if v else default
+            except Exception:
+                return default
+
+        try:
+            resp = self._get("cgi-bin/management/manaRequest.cgi",
+                             params={"subfunc": "sysmonitor", "sys_memory_use": "1"})
+            raw  = resp.text
+        except Exception as e:
+            print(f"[memory][{self.ip_address}] error: {e}")
+            return None
+
+        if _x(raw, "authPassed") != "1":
+            return None
+
+        total = _xi(raw, "mem_total")
+        used  = _xi(raw, "mem_used")
+        free  = _xi(raw, "mem_free")
+
+        if total <= 0:
+            return None
+
+        if used == 0 and free > 0:
+            used = total - free
+
+        return {
+            "total": total,
+            "used":  used,
+            "free":  free,
+            "pct":   round(used / total * 100, 1) if total else 0,
+        }
+
+    def get_pool_info(self) -> list:
+        """取得硬碟儲存池使用空間，回傳 list of dict（每個 pool 一筆）。"""
+        if not self.sid:
+            return []
+
+        import re as _re
+
+        def _x(text, tag):
+            m = _re.search(
+                rf'<{_re.escape(tag)}[^>]*>\s*(?:<!\[CDATA\[)?\s*(.*?)\s*(?:\]\]>)?\s*</{_re.escape(tag)}>',
+                text, _re.IGNORECASE | _re.DOTALL)
+            return m.group(1).strip() if m else None
+
+        def _parse_tb(s: str) -> float:
+            """將 '261.74 TB' / '500.0 GB' 等字串統一轉為 TB (float)。"""
+            if not s:
+                return 0.0
+            m = _re.match(r'([\d.]+)\s*(TB|GB|MB)', s.strip(), _re.IGNORECASE)
+            if not m:
+                return 0.0
+            val, unit = float(m.group(1)), m.group(2).upper()
+            return val if unit == 'TB' else val / 1024 if unit == 'GB' else val / 1024 / 1024
+
+        pools = []
+        for pool_id in range(1, 16):
+            try:
+                resp = self._get("cgi-bin/disk/disk_manage.cgi", params={
+                    "func":       "extra_get",
+                    "store":      "poolInfo",
+                    "poolID":     pool_id,
+                    "Pool_Info":  "1",
+                })
+                raw = resp.text
+            except Exception as e:
+                print(f"[pool][{self.ip_address}] pool_id={pool_id} error: {e}")
+                break
+
+            capacity  = _x(raw, "pool_capacity")
+            allocated = _x(raw, "pool_allocated")
+            freesize  = _x(raw, "pool_freesize")
+
+            if not capacity:
+                break
+
+            cap_tb  = _parse_tb(capacity)
+            free_tb = _parse_tb(freesize)
+            used_tb = cap_tb - free_tb
+            pct     = round(used_tb / cap_tb * 100, 1) if cap_tb > 0 else 0.0
+
+            pools.append({
+                "pool_id":   pool_id,
+                "capacity":  capacity,
+                "allocated": allocated or "-",
+                "freesize":  freesize  or "-",
+                "percent":   pct,
+            })
+
+        return pools
 
     def start_recording(self, camera_guid: str) -> bool:
         """啟動錄影方式"""

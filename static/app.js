@@ -10,9 +10,9 @@ async function fetchDashboardData() {
     try {
         const response = await fetch('/api/dashboard_data');
         const data = await response.json();
-        
+
         document.getElementById('last-updated').textContent = `Last Updated: ${data.timestamp}`;
-        
+
         renderServers(data.servers);
         renderCameraStats(data.servers);
         renderCameras(data.servers);
@@ -80,15 +80,19 @@ function getRecordingLabel(recState) {
 function renderServers(servers) {
     const container = document.getElementById('servers-container');
     container.innerHTML = '';
-    
+
     servers.forEach(server => {
         const card = document.createElement('div');
-        const blinkClass = server.status.toUpperCase() !== 'ONLINE' ? 'blinking-border' : '';
+        const isOffline = server.status.toUpperCase() !== 'ONLINE';
+        const hasDiskFault = (server.disk_smart || []).length > 0;
+        const blinkClass = isOffline ? 'blinking-border'
+            : hasDiskFault ? 'blinking-border-warning'
+                : '';
         card.className = `server-card ${blinkClass}`;
-        
+
         let camerasHtml = '';
         let recDaysStatsHtml = '';
-        
+
         if (server.cameras && server.cameras.length > 0) {
             // Calculate rec days stats
             const stats = {};
@@ -100,9 +104,9 @@ function renderServers(servers) {
             const statsItems = sortedDays.map(days => {
                 return `${days} 天 : <strong style="color: var(--text-primary);">${stats[days]}</strong> 支`;
             }).join(' <span style="color:var(--text-secondary);">/</span> ');
-            
+
             recDaysStatsHtml = `<div style="margin-top: 0.5rem; font-size: 0.8rem; color: var(--text-secondary); line-height: 1.4;">錄影天數 [ ${statsItems} ]</div>`;
-            
+
             // Build camera list HTML
             camerasHtml = server.cameras.map(c => {
                 const connLabel = getCameraConnectionLabel(c.status);
@@ -120,13 +124,75 @@ function renderServers(servers) {
             camerasHtml = '<li style="color: var(--text-secondary); text-align: center; padding: 0.5rem 0;">No cameras</li>';
         }
 
+        // 儲存空間：優先用 pool_info（disk_manage API），fallback 用 disk_usage（chartReq API）
+        let diskHtml = '';
+        const pools = server.pool_info || [];
+        const diskUsage = server.disk_usage || [];
+
+        if (pools.length > 0) {
+            diskHtml = '<div class="sysinfo-box" style="margin-top:0.6rem; padding:0.5rem 0.75rem; gap:0.3rem;">' +
+                '<span class="sysinfo-box-label" style="font-size:0.7rem;">Storage Pool</span>' +
+                pools.map(p => {
+                    const pct = Math.min(p.percent, 100);
+                    const barColor = pct >= 90 ? 'var(--danger-color)' : pct >= 75 ? 'var(--warning-color)' : 'var(--success-color)';
+                    return `<div style="margin-bottom:0.2rem;">
+                        <div style="display:flex;justify-content:space-between;font-size:0.72rem;color:var(--text-secondary);margin-bottom:0.1rem;">
+                            <span style="font-weight:500;color:var(--text-primary);">Pool ${p.pool_id}</span>
+                            <span>${p.freesize} 可用 / ${p.capacity} (${p.percent}%)</span>
+                        </div>
+                        <div style="background:rgba(255,255,255,0.08);border-radius:4px;height:5px;overflow:hidden;">
+                            <div style="width:${pct}%;height:100%;background:${barColor};border-radius:4px;transition:width 0.4s;"></div>
+                        </div>
+                    </div>`;
+                }).join('') +
+                '</div>';
+        } else if (diskUsage.length > 0) {
+            const fmtGB = gb => gb >= 1024 ? (gb / 1024).toFixed(1) + ' TB' : gb.toFixed(1) + ' GB';
+            diskHtml = '<div class="sysinfo-box" style="margin-top:0.6rem; padding:0.5rem 0.75rem; gap:0.3rem;">' +
+                '<span class="sysinfo-box-label" style="font-size:0.7rem;">Storage Usage</span>' +
+                diskUsage.map(d => {
+                    const pct = Math.min(d.percent, 100);
+                    const barColor = pct >= 90 ? 'var(--danger-color)' : pct >= 75 ? 'var(--warning-color)' : 'var(--success-color)';
+                    return `<div style="margin-bottom:0.15rem;">
+                        <div style="display:flex;justify-content:space-between;font-size:0.72rem;color:var(--text-secondary);margin-bottom:0.1rem;">
+                            <span style="font-weight:500;color:var(--text-primary);">${d.name}</span>
+                            <span>${fmtGB(d.used_gb)} / ${fmtGB(d.total_gb)} (${d.percent}%)</span>
+                        </div>
+                        <div style="background:rgba(255,255,255,0.08);border-radius:4px;height:5px;overflow:hidden;">
+                            <div style="width:${pct}%;height:100%;background:${barColor};border-radius:4px;transition:width 0.4s;"></div>
+                        </div>
+                    </div>`;
+                }).join('') +
+                '</div>';
+        }
+
+        // 硬碟異常 HTML
+        const smartAlerts = server.disk_smart || [];
+        let smartHtml = '';
+        if (smartAlerts.length > 0) {
+            const items = smartAlerts.map(d =>
+                `<div style="display:flex;align-items:center;gap:0.4rem;font-size:0.75rem;">
+                    <span style="color:var(--danger-color);">⚠</span>
+                    <span style="color:var(--text-secondary);">硬碟</span>
+                    <span style="font-weight:600;color:var(--text-primary);">${d.slot}</span>
+                    <span style="color:var(--danger-color);">${d.label}</span>
+                </div>`
+            ).join('');
+            smartHtml = `<div style="margin-top:0.5rem;padding:0.5rem 0.75rem;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:6px;display:flex;flex-direction:column;gap:0.25rem;">
+                <span style="font-size:0.68rem;color:var(--danger-color);text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">硬碟異常</span>
+                ${items}
+            </div>`;
+        }
+
         card.innerHTML = `
             <div class="server-header">
                 <div class="server-name">${server.name}</div>
                 <div class="status-badge ${getStatusClass(server.status)}">${server.status}</div>
             </div>
             <div class="server-ip">IP : ${server.ip_address}</div>
-            <div class="server-ip" style="margin-top: 0.2rem;">System : ${server.qvr_prefix || 'Unknown'}</div>
+            ${diskHtml}
+            ${smartHtml}
+            <div class="server-ip" style="margin-top: 0.6rem;">System : ${server.qvr_prefix || 'Unknown'}</div>
             ${recDaysStatsHtml}
             <div style="margin-top: 0.5rem; font-size: 0.8rem; color: var(--text-secondary); display: flex; justify-content: space-between; align-items: center;">
                 <span>Cameras : ${server.cameras ? server.cameras.length : 0}</span>
@@ -138,6 +204,7 @@ function renderServers(servers) {
                 </ul>
             </div>
             <div class="server-card-actions">
+                <button class="btn-sysinfo" onclick="openSysinfoModal('${server.name}')">系統身分證</button>
                 <button class="btn-edit" onclick="openServerModal('${server.name}')">Edit</button>
                 <button class="btn-delete" onclick="deleteServer('${server.name}')">Delete</button>
             </div>
@@ -146,7 +213,7 @@ function renderServers(servers) {
     });
 }
 
-window.toggleCameras = function(btn) {
+window.toggleCameras = function (btn) {
     const list = btn.parentElement.nextElementSibling;
     if (list.style.display === 'none') {
         list.style.display = 'block';
@@ -160,27 +227,27 @@ window.toggleCameras = function(btn) {
 function renderCameras(servers) {
     const container = document.getElementById('cameras-container');
     container.innerHTML = '';
-    
+
     let hasCameras = false;
     servers.forEach(server => {
         if (!server.cameras || server.cameras.length === 0) return;
         hasCameras = true;
-        
+
         const group = document.createElement('div');
-        
+
         let camerasHtml = '';
         let hasAbnormalCamera = false;
-        
+
         server.cameras.forEach(cam => {
             const conn = getCameraConnectionLabel(cam.status);
             const rec = getRecordingLabel(cam.rec_state);
-            
+
             let cardBlinkClass = '';
             if (conn.label !== 'On Line' && conn.label !== 'IDLE') {
                 hasAbnormalCamera = true;
                 cardBlinkClass = 'blinking-border';
             }
-            
+
             camerasHtml += `
                 <div class="camera-card ${cardBlinkClass}">
                     <div class="camera-name">
@@ -226,15 +293,15 @@ function renderCameras(servers) {
                 </div>
             `;
         });
-        
+
         const isExpanded = cameraGridState[server.name] !== false; // default true
         const gridDisplay = isExpanded ? 'grid' : 'none';
         const iconTransform = isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)';
         const blinkClass = (!isExpanded && hasAbnormalCamera) ? 'blinking-border' : '';
-        
+
         group.className = `server-camera-group ${blinkClass}`;
         group.dataset.hasAbnormal = hasAbnormalCamera ? 'true' : 'false';
-        
+
         group.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none;" onclick="toggleCameraGrid(this, '${server.name}')">
                 <h3 style="margin: 0; color: var(--accent-color);">${server.name} Cameras</h3>
@@ -244,20 +311,20 @@ function renderCameras(servers) {
                 ${camerasHtml}
             </div>
         `;
-        
+
         container.appendChild(group);
     });
-    
+
     if (!hasCameras) {
         container.innerHTML = '<div style="color: var(--text-secondary);">No cameras found or failed to connect to servers.</div>';
     }
 }
 
-window.toggleCameraGrid = function(header, serverName) {
+window.toggleCameraGrid = function (header, serverName) {
     const group = header.parentElement;
     const grid = header.nextElementSibling;
     const icon = header.querySelector('.toggle-icon');
-    
+
     if (grid.style.display === 'none') {
         grid.style.display = 'grid';
         icon.style.transform = 'rotate(0deg)';
@@ -276,7 +343,7 @@ window.toggleCameraGrid = function(header, serverName) {
 
 async function controlCamera(serverName, cameraGuid, action) {
     if (!confirm(`Are you sure you want to ${action === 'start_rec' ? 'START' : 'STOP'} recording for this camera?`)) return;
-    
+
     try {
         const response = await fetch('/api/camera_action', {
             method: 'POST',
@@ -284,7 +351,7 @@ async function controlCamera(serverName, cameraGuid, action) {
             body: JSON.stringify({ server_name: serverName, camera_guid: cameraGuid, action: action })
         });
         const data = await response.json();
-        
+
         if (data.success) {
             alert('Action completed successfully!');
             fetchDashboardData(); // Refresh data immediately
@@ -309,9 +376,9 @@ function renderServerAlarms(newAlarms) {
 }
 
 function renderServerAlarmPage(page) {
-    const tbody      = document.getElementById('server-alarms-body');
+    const tbody = document.getElementById('server-alarms-body');
     const pagination = document.getElementById('server-alarms-pagination');
-    tbody.innerHTML  = '';
+    tbody.innerHTML = '';
 
     if (serverAlarmBuffer.length === 0) {
         tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; color:var(--success-color);">All servers connected normally.</td></tr>`;
@@ -401,13 +468,13 @@ function renderAlarmPage(page) {
 // ── Password Visibility Toggle ───────────────────────────────────────────────
 
 function togglePasswordVisibility() {
-    const input  = document.getElementById('field-password');
-    const eyeOpen   = document.getElementById('eye-open');
+    const input = document.getElementById('field-password');
+    const eyeOpen = document.getElementById('eye-open');
     const eyeClosed = document.getElementById('eye-closed');
-    const isHidden  = input.type === 'password';
+    const isHidden = input.type === 'password';
     input.type = isHidden ? 'text' : 'password';
-    eyeOpen.style.display   = isHidden ? 'none'  : '';
-    eyeClosed.style.display = isHidden ? ''      : 'none';
+    eyeOpen.style.display = isHidden ? 'none' : '';
+    eyeClosed.style.display = isHidden ? '' : 'none';
 }
 
 // ── Server Management Modal ──────────────────────────────────────────────────
@@ -448,11 +515,11 @@ function closeServerModal() {
 
 async function saveServerConfig() {
     const payload = {
-        name:       document.getElementById('field-name').value.trim(),
+        name: document.getElementById('field-name').value.trim(),
         ip_address: document.getElementById('field-ip').value.trim(),
-        port:       parseInt(document.getElementById('field-port').value) || 8080,
-        username:   document.getElementById('field-username').value.trim(),
-        password:   document.getElementById('field-password').value,
+        port: parseInt(document.getElementById('field-port').value) || 8080,
+        username: document.getElementById('field-username').value.trim(),
+        password: document.getElementById('field-password').value,
     };
 
     if (!payload.name || !payload.ip_address || !payload.username || !payload.password) {
@@ -501,6 +568,145 @@ document.getElementById('server-modal-overlay').addEventListener('click', e => {
     if (e.target === document.getElementById('server-modal-overlay')) closeServerModal();
 });
 
+// ── System Info Modal ────────────────────────────────────────────────────────
+
+async function openSysinfoModal(serverName) {
+    document.getElementById('sysinfo-modal-title').textContent = `系統身分證 ─ ${serverName}`;
+    document.getElementById('sysinfo-content').innerHTML =
+        '<div style="text-align:center;color:var(--text-secondary);padding:2rem;">讀取中...</div>';
+    document.getElementById('sysinfo-modal-overlay').style.display = 'flex';
+
+    try {
+        const res = await fetch(`/api/system_info/${encodeURIComponent(serverName)}`);
+        const data = await res.json();
+        if (data.success) {
+            renderSysinfoContent(data);
+        } else {
+            document.getElementById('sysinfo-content').innerHTML =
+                `<div style="color:var(--danger-color);padding:1rem;">Error: ${data.message}</div>`;
+        }
+    } catch (e) {
+        document.getElementById('sysinfo-content').innerHTML =
+            `<div style="color:var(--danger-color);padding:1rem;">Failed to load.</div>`;
+    }
+}
+
+function closeSysinfoModal() {
+    document.getElementById('sysinfo-modal-overlay').style.display = 'none';
+}
+
+document.getElementById('sysinfo-modal-overlay').addEventListener('click', e => {
+    if (e.target === document.getElementById('sysinfo-modal-overlay')) closeSysinfoModal();
+});
+
+function renderSysinfoContent(data) {
+    const s = data.sysinfo || {};
+    const m = data.memory || {};
+    const disks = data.disk_usage || [];
+    const pools = data.pool_info || [];
+    const smartAlerts = data.disk_smart || [];
+
+    const uptime = `${s.uptime_day || 0}d ${s.uptime_hour || 0}h ${s.uptime_min || 0}m ${s.uptime_sec || 0}s`;
+    const fmtGB = gb => gb >= 1024 ? (gb / 1024).toFixed(1) + ' TB' : gb.toFixed(1) + ' GB';
+
+    const box = (label, value) =>
+        `<div class="sysinfo-box"><span class="sysinfo-box-label">${label}</span><span class="sysinfo-box-value">${value}</span></div>`;
+
+    const fullRow = (content) =>
+        `<div class="sysinfo-full">${content}</div>`;
+
+    const divider = () => '<div class="sysinfo-divider"></div>';
+
+    let memHtml = 'N/A';
+    if (m.total) {
+        const pct = m.pct || 0;
+        const barColor = pct >= 90 ? 'var(--danger-color)' : pct >= 70 ? 'var(--warning-color)' : 'var(--success-color)';
+        memHtml = `
+            <div style="display:flex;flex-direction:column;gap:0.35rem;width:100%; margin-top:0.25rem;">
+                <span class="sysinfo-box-value">${m.used} / ${m.total} MB (${pct}%)</span>
+                <div style="background:rgba(255,255,255,0.08);border-radius:4px;height:6px;overflow:hidden;">
+                    <div style="width:${pct}%;height:100%;background:${barColor};border-radius:4px;"></div>
+                </div>
+            </div>`;
+    }
+
+    const poolBarRow = p => {
+        const pct = Math.min(p.percent, 100);
+        const barColor = pct >= 90 ? 'var(--danger-color)' : pct >= 75 ? 'var(--warning-color)' : 'var(--success-color)';
+        return `
+        <div style="margin-bottom:0.75rem;">
+            <div style="display:flex;justify-content:space-between;font-size:0.85rem;color:var(--text-secondary);margin-bottom:0.3rem;">
+                <span style="font-weight:500;color:var(--text-primary);">Pool ${p.pool_id}</span>
+                <span>${p.freesize} 可用 / ${p.capacity} (${p.percent}%)</span>
+            </div>
+            <div style="background:rgba(255,255,255,0.08);border-radius:4px;height:8px;overflow:hidden;">
+                <div style="width:${pct}%;height:100%;background:${barColor};border-radius:4px;"></div>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:0.75rem;color:var(--text-secondary);margin-top:0.2rem;">
+                <span>已分配 ${p.allocated}</span>
+                <span>總容量 ${p.capacity}</span>
+            </div>
+        </div>`;
+    };
+
+    let diskRows = '';
+    if (disks.length > 0) {
+        diskRows = `<div class="sysinfo-box" style="gap:0;"><span class="sysinfo-box-label" style="margin-bottom:0.5rem;">Disk Usage</span>` +
+            disks.map(d => {
+                const pct = Math.min(d.percent, 100);
+                const barColor = pct >= 90 ? 'var(--danger-color)' : pct >= 75 ? 'var(--warning-color)' : 'var(--success-color)';
+                return `<div class="sysinfo-row sysinfo-disk-row">
+                <span class="sysinfo-label" style="font-weight:500;color:var(--text-primary);">${d.name}</span>
+                <div style="flex:1;margin:0 0.75rem;">
+                    <div style="background:rgba(255,255,255,0.08);border-radius:4px;height:6px;overflow:hidden;">
+                        <div style="width:${pct}%;height:100%;background:${barColor};border-radius:4px;"></div>
+                    </div>
+                </div>
+                <span style="font-size:0.8rem;color:var(--text-secondary);white-space:nowrap;">
+                    ${fmtGB(d.used_gb)} / ${fmtGB(d.total_gb)} (${d.percent}%)
+                </span>
+            </div>`;
+            }).join('') + `</div>`;
+    }
+
+    let poolRows = '';
+    if (pools.length > 0) {
+        poolRows = `<div class="sysinfo-box"><span class="sysinfo-box-label" style="margin-bottom:0.5rem;">Storage Pool</span>` +
+            pools.map(poolBarRow).join('') + `</div>`;
+    }
+
+    let smartRows = '';
+    if (smartAlerts.length > 0) {
+        const items = smartAlerts.map(d =>
+            `<div style="display:flex;align-items:center;gap:0.5rem;font-size:0.8rem;">
+                <span style="color:var(--danger-color);">⚠</span>
+                <span style="color:var(--text-secondary);">硬碟</span>
+                <span style="font-weight:600;color:var(--text-primary);">${d.slot}</span>
+                <span class="status-badge status-offline">${d.label}</span>
+            </div>`
+        ).join('');
+        smartRows = fullRow(`<div class="sysinfo-box" style="border-color:rgba(239,68,68,0.4);background:rgba(239,68,68,0.08);">
+            <span class="sysinfo-box-label" style="color:var(--danger-color);">硬碟異常</span>
+            ${items}
+        </div>`);
+    }
+
+    document.getElementById('sysinfo-content').innerHTML = `
+        <div class="sysinfo-grid">
+            ${box('Server Name', s.server_name || '-')}
+            ${box('Serial', s.serial_number || '-')}
+            ${fullRow(box('Uptime', uptime))}
+            ${box('CPU Usage', (s.cpu_usage || '-') + ' %')}
+            ${box('CPU Temp', (s.cpu_tempc || '-') + ' °C')}
+            ${box('System Temp', (s.sys_tempc || '-') + ' °C')}
+            ${box('Disks', `HDD: ${s.disk_num || 0} &nbsp;|&nbsp; SSD: ${s.ssd_num || 0} &nbsp;|&nbsp; M.2: ${s.m2_num || 0}`)}
+            ${fullRow(`<div class="sysinfo-box"><span class="sysinfo-box-label">Memory</span>${memHtml}</div>`)}
+            ${diskRows ? fullRow(diskRows) : ''}
+            ${poolRows ? fullRow(poolRows) : ''}
+            ${smartRows}
+        </div>`;
+}
+
 // ── Logs Modal ───────────────────────────────────────────────────────────────
 
 async function openLogsModal(type = 'camera') {
@@ -509,7 +715,7 @@ async function openLogsModal(type = 'camera') {
     const title = document.querySelector('#logs-modal-overlay .modal-header h3');
     title.textContent = (type === 'camera' ? 'Camera' : 'Server') + ' Alarm Log History (Up to 14 days)';
     content.innerHTML = 'Fetching logs...';
-    
+
     try {
         const response = await fetch(`/api/alarm_logs?type=${type}`);
         const data = await response.json();

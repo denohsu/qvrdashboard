@@ -204,8 +204,18 @@ h2 {
     100% { border-color: rgba(255, 255, 255, 0.05); box-shadow: none; }
 }
 
+@keyframes borderBlinkWarning {
+    0% { border-color: rgba(255, 255, 255, 0.05); box-shadow: none; }
+    50% { border-color: var(--warning-color); box-shadow: 0 0 15px rgba(245, 158, 11, 0.5); }
+    100% { border-color: rgba(255, 255, 255, 0.05); box-shadow: none; }
+}
+
 .blinking-border {
     animation: borderBlink 1.5s infinite !important;
+}
+
+.blinking-border-warning {
+    animation: borderBlinkWarning 1.5s infinite !important;
 }
 
 .server-camera-group h3 {
@@ -520,6 +530,79 @@ tbody tr:hover {
 }
 
 .section-header h2 { margin-bottom: 0; }
+
+/* System Info Button */
+.btn-sysinfo {
+    flex: 1;
+    padding: 0.4rem;
+    border-radius: 6px;
+    font-size: 0.78rem;
+    cursor: pointer;
+    border: 1px solid var(--accent-color);
+    background: rgba(59, 130, 246, 0.15);
+    color: var(--text-primary);
+    transition: 0.2s;
+}
+
+.btn-sysinfo:hover { background: rgba(59, 130, 246, 0.3); }
+
+/* System Info Modal Content */
+.sysinfo-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+}
+
+.sysinfo-full {
+    grid-column: 1 / -1;
+}
+
+.sysinfo-box {
+    background: rgba(15, 23, 42, 0.5);
+    border: 1px solid var(--glass-border);
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+.sysinfo-box-label {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.sysinfo-box-value {
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.sysinfo-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.85rem;
+    gap: 0.5rem;
+    padding: 0.3rem 0;
+}
+
+.sysinfo-disk-row {
+    align-items: center;
+}
+
+.sysinfo-label {
+    color: var(--text-secondary);
+    min-width: 100px;
+    flex-shrink: 0;
+}
+
+.sysinfo-divider {
+    border-top: 1px solid var(--glass-border);
+    margin: 0.5rem 0;
+}
 
 /* Animations */
 @keyframes fadeIn {

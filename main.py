@@ -83,7 +83,10 @@ def _fetch_server_data(name: str, api, now_str: str) -> tuple:
         "qvr_prefix": "qvrpro",
         "status": "Offline",
         "camera_count": 0,
-        "cameras": []
+        "cameras": [],
+        "disk_usage": [],
+        "pool_info": [],
+        "disk_smart": [],
     }
     cam_alarms = []
 
@@ -92,10 +95,7 @@ def _fetch_server_data(name: str, api, now_str: str) -> tuple:
                         "status": "Offline", "timestamp": now_str}
         return server_info, cam_alarms, server_alarm
 
-    # 優先嘗試 renew SID，若無 SID 或已過期則重新登入
-    if not (api.sid and api.renew_sid()):
-        api.get_sid()
-    if not api.sid:
+    if not api.get_sid():  # get_sid 內部已處理 renew → 重登
         server_info["status"] = "Auth Failed"
         server_alarm = {"server_name": name, "ip_address": api.ip_address,
                         "status": "Auth Failed", "timestamp": now_str}
@@ -111,6 +111,9 @@ def _fetch_server_data(name: str, api, now_str: str) -> tuple:
 
     server_info["status"] = "Online"
     server_info["qvr_prefix"] = api._qvr_prefix or "qvrpro"
+    server_info["disk_usage"] = api.get_disk_usage()
+    server_info["pool_info"]  = api.get_pool_info()
+    server_info["disk_smart"] = api.get_disk_smart()
 
     cameras_raw = []
     if isinstance(camera_data, dict):
@@ -282,6 +285,29 @@ def delete_server_config(server_name: str):
         return {"success": False, "message": "Server not found"}
     save_servers_to_file(SERVERLIST_PATH, new_configs)
     return {"success": True}
+
+
+@app.get("/api/system_info/{server_name}")
+def get_server_system_info(server_name: str):
+    """取得指定伺服器的系統身分證資訊"""
+    servers = load_servers_from_file(SERVERLIST_PATH)
+    if server_name not in servers:
+        return {"success": False, "message": "Server not found"}
+
+    api = servers[server_name]
+    if not api.check_connection():
+        return {"success": False, "message": "Connection failed"}
+    if not api.get_sid():
+        return {"success": False, "message": "Auth failed"}
+
+    return {
+        "success":    True,
+        "sysinfo":    api.get_system_info(),
+        "memory":     api.get_memory_info(),
+        "disk_usage": api.get_disk_usage(),
+        "pool_info":  api.get_pool_info(),
+        "disk_smart": api.get_disk_smart(),
+    }
 
 
 @app.get("/api/alarm_logs")
